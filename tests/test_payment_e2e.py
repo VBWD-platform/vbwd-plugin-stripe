@@ -342,7 +342,9 @@ class TestCheckoutCompletedE2E:
 
         mock_repos["invoice_repository"].find_by_id.return_value = invoice
         mock_repos["subscription_repository"].find_by_id.return_value = new_sub
-        mock_repos["subscription_repository"].find_active_by_user_in_category.return_value = [old_sub]
+        mock_repos[
+            "subscription_repository"
+        ].find_active_by_user_in_category.return_value = [old_sub]
 
         checkout_obj = {
             "id": "cs_upgrade",
