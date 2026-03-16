@@ -11,19 +11,21 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout plugin
-        uses: actions/checkout@v4
-        with:
-          path: plugin-src
-
       - name: Checkout vbwd-backend
         uses: actions/checkout@v4
         with:
           repository: VBWD-platform/vbwd-backend
           path: vbwd-backend
 
-      - name: Overlay plugin source
-        run: cp -r plugin-src/. vbwd-backend/plugins/stripe/
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin-src
+
+      - name: Install plugin into backend
+        run: |
+          rsync -a --exclude='.git' --exclude='.github' \
+            plugin-src/ vbwd-backend/plugins/stripe/
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -41,7 +43,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/vbwd-backend
           REDIS_URL: redis://localhost:6379/0
-          DATABASE_URL: postgresql://vbwd:vbwd@localhost:5432/vbwd_test
+          DATABASE_URL: postgresql://vbwd:vbwd@localhost:5432/vbwd
         run: |
           cd vbwd-backend
           if [ -d "plugins/stripe/tests/unit" ]; then
@@ -63,7 +65,7 @@ jobs:
         env:
           POSTGRES_USER: vbwd
           POSTGRES_PASSWORD: vbwd
-          POSTGRES_DB: vbwd_test
+          POSTGRES_DB: vbwd
         ports:
           - 5432:5432
         options: >-
@@ -81,19 +83,21 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - name: Checkout plugin
-        uses: actions/checkout@v4
-        with:
-          path: plugin-src
-
       - name: Checkout vbwd-backend
         uses: actions/checkout@v4
         with:
           repository: VBWD-platform/vbwd-backend
           path: vbwd-backend
 
-      - name: Overlay plugin source
-        run: cp -r plugin-src/. vbwd-backend/plugins/stripe/
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin-src
+
+      - name: Install plugin into backend
+        run: |
+          rsync -a --exclude='.git' --exclude='.github' \
+            plugin-src/ vbwd-backend/plugins/stripe/
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -111,7 +115,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/vbwd-backend
           REDIS_URL: redis://localhost:6379/0
-          DATABASE_URL: postgresql://vbwd:vbwd@localhost:5432/vbwd_test
+          DATABASE_URL: postgresql://vbwd:vbwd@localhost:5432/vbwd
         run: |
           cd vbwd-backend
           if [ -d "plugins/stripe/tests/integration" ]; then
