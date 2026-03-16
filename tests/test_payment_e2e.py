@@ -50,7 +50,7 @@ if "stripe" not in sys.modules:
 
 # Import blueprint at module level (safe now that stripe is mocked).
 # This prevents repeated imports that trigger bcrypt PyO3 re-init errors.
-from plugins.stripe.routes import stripe_plugin_bp
+from plugins.stripe.routes import stripe_plugin_bp  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

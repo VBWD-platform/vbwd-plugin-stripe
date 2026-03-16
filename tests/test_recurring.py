@@ -9,19 +9,17 @@ import sys
 import pytest
 from decimal import Decimal
 from uuid import uuid4, UUID
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
-from flask import Flask, g
+from flask import Flask
 
 from src.plugins.config_store import PluginConfigEntry
 from src.models.enums import (
     InvoiceStatus,
     LineItemType,
     BillingPeriod,
-    SubscriptionStatus,
 )
 from src.events.payment_events import (
-    PaymentCapturedEvent,
     SubscriptionCancelledEvent,
     PaymentFailedEvent,
 )
