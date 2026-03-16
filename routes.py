@@ -45,10 +45,12 @@ def _get_adapter(config):
     from plugins.stripe.sdk_adapter import StripeSDKAdapter
 
     prefix = "test_" if config.get("sandbox", True) else "live_"
-    return StripeSDKAdapter(SDKConfig(
-        api_key=config.get(f"{prefix}secret_key") or config.get("secret_key", ""),
-        sandbox=config.get("sandbox", True),
-    ))
+    return StripeSDKAdapter(
+        SDKConfig(
+            api_key=config.get(f"{prefix}secret_key") or config.get("secret_key", ""),
+            sandbox=config.get("sandbox", True),
+        )
+    )
 
 
 def _build_stripe_subscription_items(invoice):
@@ -62,29 +64,33 @@ def _build_stripe_subscription_items(invoice):
             if sub and sub.tarif_plan and sub.tarif_plan.is_recurring:
                 period = sub.tarif_plan.billing_period.value
                 recurring = BILLING_PERIOD_TO_STRIPE.get(period, {"interval": "month"})
-                items.append({
-                    "price_data": {
-                        "currency": currency,
-                        "unit_amount": int(li.unit_price * 100),
-                        "recurring": recurring,
-                        "product_data": {"name": sub.tarif_plan.name},
-                    },
-                    "quantity": 1,
-                })
+                items.append(
+                    {
+                        "price_data": {
+                            "currency": currency,
+                            "unit_amount": int(li.unit_price * 100),
+                            "recurring": recurring,
+                            "product_data": {"name": sub.tarif_plan.name},
+                        },
+                        "quantity": 1,
+                    }
+                )
         elif li.item_type == LineItemType.ADD_ON:
             addon_sub = db.session.get(AddOnSubscription, li.item_id)
             if addon_sub and addon_sub.addon and addon_sub.addon.is_recurring:
                 period = addon_sub.addon.billing_period
                 recurring = BILLING_PERIOD_TO_STRIPE.get(period, {"interval": "month"})
-                items.append({
-                    "price_data": {
-                        "currency": currency,
-                        "unit_amount": int(li.unit_price * 100),
-                        "recurring": recurring,
-                        "product_data": {"name": addon_sub.addon.name},
-                    },
-                    "quantity": li.quantity,
-                })
+                items.append(
+                    {
+                        "price_data": {
+                            "currency": currency,
+                            "unit_amount": int(li.unit_price * 100),
+                            "recurring": recurring,
+                            "product_data": {"name": addon_sub.addon.name},
+                        },
+                        "quantity": li.quantity,
+                    }
+                )
     return items
 
 
@@ -110,7 +116,9 @@ def create_session():
         or request.headers.get("Referer", "").rstrip("/").rsplit("/pay", 1)[0]
         or request.host_url.rstrip("/")
     )
-    success_url = f"{frontend_base}/pay/stripe/success?session_id={{CHECKOUT_SESSION_ID}}"
+    success_url = (
+        f"{frontend_base}/pay/stripe/success?session_id={{CHECKOUT_SESSION_ID}}"
+    )
     cancel_url = f"{frontend_base}/pay/stripe/cancel"
 
     if mode == "subscription":
@@ -168,18 +176,19 @@ def stripe_webhook():
         return err
 
     import stripe
+
     payload = request.get_data()
     signature = request.headers.get("Stripe-Signature")
 
     prefix = "test_" if config.get("sandbox", True) else "live_"
     secret_key = config.get(f"{prefix}secret_key") or config.get("secret_key", "")
-    webhook_secret = config.get(f"{prefix}webhook_secret") or config.get("webhook_secret", "")
+    webhook_secret = config.get(f"{prefix}webhook_secret") or config.get(
+        "webhook_secret", ""
+    )
 
     try:
         stripe.api_key = secret_key
-        event = stripe.Webhook.construct_event(
-            payload, signature, webhook_secret
-        )
+        event = stripe.Webhook.construct_event(payload, signature, webhook_secret)
     except (stripe.error.SignatureVerificationError, ValueError):
         return jsonify({"error": "Invalid signature"}), 400
 
@@ -287,8 +296,11 @@ def _handle_payment_failed(stripe_invoice):
         subscription_id=subscription.id,
         user_id=subscription.user_id,
         error_code="payment_failed",
-        error_message=stripe_invoice.get("last_payment_error", {}).get("message", "Payment failed")
-        if isinstance(stripe_invoice.get("last_payment_error"), dict) else "Payment failed",
+        error_message=stripe_invoice.get("last_payment_error", {}).get(
+            "message", "Payment failed"
+        )
+        if isinstance(stripe_invoice.get("last_payment_error"), dict)
+        else "Payment failed",
         provider="stripe",
     )
     container.event_dispatcher().emit(event)
@@ -305,12 +317,17 @@ def _handle_charge_refunded(charge, config):
 
     # Look up the checkout session that created this charge
     import stripe
+
     prefix = "test_" if config.get("sandbox", True) else "live_"
     stripe.api_key = config.get(f"{prefix}secret_key") or config.get("secret_key", "")
     try:
-        sessions = stripe.checkout.Session.list(payment_intent=payment_intent_id, limit=1)
+        sessions = stripe.checkout.Session.list(
+            payment_intent=payment_intent_id, limit=1
+        )
     except Exception:
-        logger.exception("Failed to look up session for refund PI=%s", payment_intent_id)
+        logger.exception(
+            "Failed to look up session for refund PI=%s", payment_intent_id
+        )
         return
 
     if not sessions.data:
@@ -336,7 +353,9 @@ def _handle_charge_refunded(charge, config):
     )
     container = current_app.container
     container.event_dispatcher().emit(event)
-    logger.info("Refund processed for invoice %s, charge %s", invoice_id, charge.get("id"))
+    logger.info(
+        "Refund processed for invoice %s, charge %s", invoice_id, charge.get("id")
+    )
 
 
 def _handle_refund_updated(refund_obj, config):
@@ -358,22 +377,34 @@ def _handle_refund_updated(refund_obj, config):
         if not charge_id:
             return
         import stripe
+
         stripe.api_key = api_key
         try:
             charge = stripe.Charge.retrieve(charge_id)
-            payment_intent_id = charge.get("payment_intent") if isinstance(charge, dict) else getattr(charge, "payment_intent", None)
+            payment_intent_id = (
+                charge.get("payment_intent")
+                if isinstance(charge, dict)
+                else getattr(charge, "payment_intent", None)
+            )
         except Exception:
-            logger.exception("Failed to retrieve charge %s for refund reversal", charge_id)
+            logger.exception(
+                "Failed to retrieve charge %s for refund reversal", charge_id
+            )
             return
         if not payment_intent_id:
             return
 
     import stripe
+
     stripe.api_key = api_key
     try:
-        sessions = stripe.checkout.Session.list(payment_intent=payment_intent_id, limit=1)
+        sessions = stripe.checkout.Session.list(
+            payment_intent=payment_intent_id, limit=1
+        )
     except Exception:
-        logger.exception("Failed to look up session for refund reversal PI=%s", payment_intent_id)
+        logger.exception(
+            "Failed to look up session for refund reversal PI=%s", payment_intent_id
+        )
         return
 
     if not sessions.data:
@@ -397,7 +428,11 @@ def _handle_refund_updated(refund_obj, config):
     )
     container = current_app.container
     container.event_dispatcher().emit(event)
-    logger.info("Refund reversal processed for invoice %s, refund %s", invoice_id, refund_obj.get("id"))
+    logger.info(
+        "Refund reversal processed for invoice %s, refund %s",
+        invoice_id,
+        refund_obj.get("id"),
+    )
 
 
 def _link_stripe_subscription(invoice_id, provider_subscription_id):
@@ -444,14 +479,16 @@ def _create_renewal_invoice(subscription, stripe_invoice):
         provider_session_id=stripe_invoice["id"],
     )
     # Add subscription line item
-    renewal_invoice.line_items.append(InvoiceLineItem(
-        item_type=LineItemType.SUBSCRIPTION,
-        item_id=subscription.id,
-        description=f"Renewal: {plan.name}" if plan else "Subscription renewal",
-        quantity=1,
-        unit_price=amount,
-        total_price=amount,
-    ))
+    renewal_invoice.line_items.append(
+        InvoiceLineItem(
+            item_type=LineItemType.SUBSCRIPTION,
+            item_id=subscription.id,
+            description=f"Renewal: {plan.name}" if plan else "Subscription renewal",
+            quantity=1,
+            unit_price=amount,
+            total_price=amount,
+        )
+    )
     invoice_repo.save(renewal_invoice)
     return renewal_invoice
 
@@ -480,11 +517,16 @@ def session_status(session_id):
     if data.get("status") == "paid":
         _reconcile_payment(data)
 
-    return jsonify({
-        "status": data.get("status"),
-        "amount_total": data.get("amount_total"),
-        "currency": data.get("currency"),
-    }), 200
+    return (
+        jsonify(
+            {
+                "status": data.get("status"),
+                "amount_total": data.get("amount_total"),
+                "currency": data.get("currency"),
+            }
+        ),
+        200,
+    )
 
 
 def _reconcile_payment(session_data):
@@ -515,7 +557,10 @@ def _reconcile_payment(session_data):
     if not invoice or invoice.status != InvoiceStatus.PENDING:
         return
 
-    logger.info("Reconciliation: Stripe session paid but invoice %s still PENDING — emitting event", invoice_id)
+    logger.info(
+        "Reconciliation: Stripe session paid but invoice %s still PENDING — emitting event",
+        invoice_id,
+    )
 
     # Link stripe subscription if present
     stripe_sub_id = session_data.get("subscription")

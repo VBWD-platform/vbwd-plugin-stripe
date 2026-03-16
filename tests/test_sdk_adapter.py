@@ -55,7 +55,10 @@ class TestStripeSDKAdapter:
 
         assert result.success is True
         assert result.data["session_id"] == "cs_test_session_id"
-        assert result.data["session_url"] == "https://checkout.stripe.com/pay/cs_test_session_id"
+        assert (
+            result.data["session_url"]
+            == "https://checkout.stripe.com/pay/cs_test_session_id"
+        )
 
     def test_create_payment_intent_stripe_error(self, adapter, mock_stripe):
         """create_payment_intent should return error on StripeError."""
@@ -87,7 +90,9 @@ class TestStripeSDKAdapter:
         )
 
         call_kwargs = mock_stripe.checkout.Session.create.call_args
-        line_items = call_kwargs.kwargs.get("line_items") or call_kwargs[1].get("line_items")
+        line_items = call_kwargs.kwargs.get("line_items") or call_kwargs[1].get(
+            "line_items"
+        )
         unit_amount = line_items[0]["price_data"]["unit_amount"]
         assert unit_amount == 2999
 
@@ -110,7 +115,9 @@ class TestStripeSDKAdapter:
         )
 
         call_kwargs = mock_stripe.checkout.Session.create.call_args
-        passed_meta = call_kwargs.kwargs.get("metadata") or call_kwargs[1].get("metadata")
+        passed_meta = call_kwargs.kwargs.get("metadata") or call_kwargs[1].get(
+            "metadata"
+        )
         assert passed_meta["invoice_id"] == "inv_abc"
         assert passed_meta["user_id"] == "u_456"
 
@@ -184,7 +191,9 @@ class TestStripeSDKAdapter:
         expected_event = {"type": "checkout.session.completed", "data": {}}
         mock_stripe.Webhook.construct_event.return_value = expected_event
 
-        result = adapter.verify_webhook_signature(b"payload", "sig_header", "whsec_test")
+        result = adapter.verify_webhook_signature(
+            b"payload", "sig_header", "whsec_test"
+        )
 
         assert result == expected_event
         mock_stripe.Webhook.construct_event.assert_called_once_with(
@@ -193,7 +202,9 @@ class TestStripeSDKAdapter:
 
     def test_webhook_signature_invalid(self, adapter, mock_stripe):
         """verify_webhook_signature should raise on invalid signature."""
-        mock_stripe.Webhook.construct_event.side_effect = ValueError("Invalid signature")
+        mock_stripe.Webhook.construct_event.side_effect = ValueError(
+            "Invalid signature"
+        )
 
         with pytest.raises(ValueError, match="Invalid signature"):
             adapter.verify_webhook_signature(b"payload", "bad_sig", "whsec_test")
@@ -207,7 +218,15 @@ class TestStripeSDKAdapter:
 
         result = adapter.create_subscription_session(
             customer_id="cus_test",
-            line_items=[{"price_data": {"currency": "eur", "unit_amount": 999, "recurring": {"interval": "month"}}}],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "eur",
+                        "unit_amount": 999,
+                        "recurring": {"interval": "month"},
+                    }
+                }
+            ],
             metadata={"invoice_id": "inv_1"},
             success_url="https://example.com/ok",
             cancel_url="https://example.com/cancel",
@@ -216,4 +235,7 @@ class TestStripeSDKAdapter:
         assert result.success is True
         assert result.data["session_id"] == "cs_sub_123"
         call_kwargs = mock_stripe.checkout.Session.create.call_args
-        assert call_kwargs.kwargs.get("mode") == "subscription" or call_kwargs[1].get("mode") == "subscription"
+        assert (
+            call_kwargs.kwargs.get("mode") == "subscription"
+            or call_kwargs[1].get("mode") == "subscription"
+        )

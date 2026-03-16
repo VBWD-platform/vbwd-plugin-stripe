@@ -3,7 +3,11 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 from decimal import Decimal
 from uuid import UUID
 from src.plugins.base import BasePlugin, PluginMetadata
-from src.plugins.payment_provider import PaymentProviderPlugin, PaymentResult, PaymentStatus
+from src.plugins.payment_provider import (
+    PaymentProviderPlugin,
+    PaymentResult,
+    PaymentStatus,
+)
 
 if TYPE_CHECKING:
     from flask import Blueprint
@@ -28,6 +32,7 @@ class StripePlugin(PaymentProviderPlugin):
 
     def get_blueprint(self) -> Optional["Blueprint"]:
         from plugins.stripe.routes import stripe_plugin_bp
+
         return stripe_plugin_bp
 
     def get_url_prefix(self) -> Optional[str]:
@@ -48,10 +53,13 @@ class StripePlugin(PaymentProviderPlugin):
         config_store = current_app.config_store
         config = config_store.get_config("stripe")
         prefix = "test_" if config.get("sandbox", True) else "live_"
-        return StripeSDKAdapter(SDKConfig(
-            api_key=config.get(f"{prefix}secret_key") or config.get("secret_key", ""),
-            sandbox=config.get("sandbox", True),
-        ))
+        return StripeSDKAdapter(
+            SDKConfig(
+                api_key=config.get(f"{prefix}secret_key")
+                or config.get("secret_key", ""),
+                sandbox=config.get("sandbox", True),
+            )
+        )
 
     def create_payment_intent(
         self,
@@ -74,15 +82,25 @@ class StripePlugin(PaymentProviderPlugin):
             )
         return PaymentResult(success=False, error_message=resp.error)
 
-    def process_payment(self, payment_intent_id: str, payment_method: str) -> PaymentResult:
+    def process_payment(
+        self, payment_intent_id: str, payment_method: str
+    ) -> PaymentResult:
         adapter = self._get_adapter()
         resp = adapter.capture_payment(payment_intent_id)
         if resp.success:
-            status = PaymentStatus.COMPLETED if resp.data.get("status") == "paid" else PaymentStatus.PROCESSING
-            return PaymentResult(success=True, transaction_id=payment_intent_id, status=status)
+            status = (
+                PaymentStatus.COMPLETED
+                if resp.data.get("status") == "paid"
+                else PaymentStatus.PROCESSING
+            )
+            return PaymentResult(
+                success=True, transaction_id=payment_intent_id, status=status
+            )
         return PaymentResult(success=False, error_message=resp.error)
 
-    def refund_payment(self, transaction_id: str, amount: Optional[Decimal] = None) -> PaymentResult:
+    def refund_payment(
+        self, transaction_id: str, amount: Optional[Decimal] = None
+    ) -> PaymentResult:
         adapter = self._get_adapter()
         resp = adapter.refund_payment(transaction_id, amount)
         if resp.success:
@@ -95,9 +113,12 @@ class StripePlugin(PaymentProviderPlugin):
 
     def verify_webhook(self, payload: bytes, signature: str) -> bool:
         from flask import current_app
+
         config = current_app.config_store.get_config("stripe")
         prefix = "test_" if config.get("sandbox", True) else "live_"
-        webhook_secret = config.get(f"{prefix}webhook_secret") or config.get("webhook_secret", "")
+        webhook_secret = config.get(f"{prefix}webhook_secret") or config.get(
+            "webhook_secret", ""
+        )
         adapter = self._get_adapter()
         try:
             adapter.verify_webhook_signature(payload, signature, webhook_secret)

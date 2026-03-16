@@ -57,6 +57,7 @@ from plugins.stripe.routes import stripe_plugin_bp
 # Helpers to create realistic mock domain objects
 # ---------------------------------------------------------------------------
 
+
 def _make_invoice(invoice_id, user_id, line_items=None, status="PENDING"):
     inv = MagicMock()
     inv.id = invoice_id
@@ -81,7 +82,9 @@ def _make_line_item(item_type, item_id, unit_price=Decimal("29.99")):
     return li
 
 
-def _make_subscription(sub_id, user_id, status=SubscriptionStatus.PENDING, is_recurring=True):
+def _make_subscription(
+    sub_id, user_id, status=SubscriptionStatus.PENDING, is_recurring=True
+):
     sub = MagicMock()
     sub.id = sub_id
     sub.user_id = user_id
@@ -119,6 +122,7 @@ def _make_addon_sub(addon_id, status=SubscriptionStatus.PENDING):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_stripe():
@@ -247,6 +251,7 @@ def _post_webhook(client, mock_stripe, event_type, obj):
 # Test: checkout.session.completed → invoice PAID + subscription ACTIVE
 # ===========================================================================
 
+
 class TestCheckoutCompletedE2E:
     """Full pipeline: webhook → event → handler marks invoice paid & activates sub."""
 
@@ -264,14 +269,19 @@ class TestCheckoutCompletedE2E:
 
         checkout_obj = {
             "id": "cs_test_abc",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 2999,
             "currency": "eur",
             "payment_intent": "pi_test_xyz",
             "subscription": None,
         }
 
-        resp = _post_webhook(client, mock_stripe, "checkout.session.completed", checkout_obj)
+        resp = _post_webhook(
+            client, mock_stripe, "checkout.session.completed", checkout_obj
+        )
         assert resp.status_code == 200
 
         # Invoice should be marked as paid
@@ -294,7 +304,10 @@ class TestCheckoutCompletedE2E:
 
         checkout_obj = {
             "id": "cs_test_sub",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 2999,
             "currency": "eur",
             "payment_intent": "pi_sub",
@@ -313,7 +326,9 @@ class TestCheckoutCompletedE2E:
     ):
         """If user has an existing ACTIVE subscription, it should be cancelled."""
         new_sub = _make_subscription(ids["subscription"], ids["user"])
-        old_sub = _make_subscription(uuid4(), ids["user"], status=SubscriptionStatus.ACTIVE)
+        old_sub = _make_subscription(
+            uuid4(), ids["user"], status=SubscriptionStatus.ACTIVE
+        )
 
         li = _make_line_item(LineItemType.SUBSCRIPTION, ids["subscription"])
         invoice = _make_invoice(ids["invoice"], ids["user"], [li])
@@ -324,7 +339,10 @@ class TestCheckoutCompletedE2E:
 
         checkout_obj = {
             "id": "cs_upgrade",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 4999,
             "currency": "eur",
             "payment_intent": "pi_upgrade",
@@ -344,15 +362,16 @@ class TestCheckoutCompletedE2E:
 # Test: checkout.session.completed → token bundle credited
 # ===========================================================================
 
+
 class TestTokenBundlePurchaseE2E:
     """Full pipeline: webhook → event → handler credits tokens."""
 
-    def test_tokens_credited_after_webhook(
-        self, client, mock_stripe, mock_repos, ids
-    ):
+    def test_tokens_credited_after_webhook(self, client, mock_stripe, mock_repos, ids):
         """Token purchase completed → tokens added to balance."""
         purchase = _make_token_purchase(ids["token_purchase"], token_amount=500)
-        li = _make_line_item(LineItemType.TOKEN_BUNDLE, ids["token_purchase"], Decimal("9.99"))
+        li = _make_line_item(
+            LineItemType.TOKEN_BUNDLE, ids["token_purchase"], Decimal("9.99")
+        )
         invoice = _make_invoice(ids["invoice"], ids["user"], [li])
         invoice.total_amount = Decimal("9.99")
 
@@ -360,12 +379,17 @@ class TestTokenBundlePurchaseE2E:
         balance.balance = 100  # existing balance
 
         mock_repos["invoice_repository"].find_by_id.return_value = invoice
-        mock_repos["token_bundle_purchase_repository"].find_by_id.return_value = purchase
+        mock_repos[
+            "token_bundle_purchase_repository"
+        ].find_by_id.return_value = purchase
         mock_repos["token_balance_repository"].find_by_user_id.return_value = balance
 
         checkout_obj = {
             "id": "cs_tokens",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 999,
             "currency": "eur",
             "payment_intent": "pi_tokens",
@@ -395,12 +419,17 @@ class TestTokenBundlePurchaseE2E:
         invoice = _make_invoice(ids["invoice"], ids["user"], [li])
 
         mock_repos["invoice_repository"].find_by_id.return_value = invoice
-        mock_repos["token_bundle_purchase_repository"].find_by_id.return_value = purchase
+        mock_repos[
+            "token_bundle_purchase_repository"
+        ].find_by_id.return_value = purchase
         mock_repos["token_balance_repository"].find_by_user_id.return_value = None
 
         checkout_obj = {
             "id": "cs_newtokens",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 2999,
             "currency": "eur",
             "payment_intent": "pi_newtokens",
@@ -418,12 +447,11 @@ class TestTokenBundlePurchaseE2E:
 # Test: checkout.session.completed → add-on activated
 # ===========================================================================
 
+
 class TestAddOnActivationE2E:
     """Full pipeline: webhook → event → handler activates add-on subscription."""
 
-    def test_addon_activated_after_webhook(
-        self, client, mock_stripe, mock_repos, ids
-    ):
+    def test_addon_activated_after_webhook(self, client, mock_stripe, mock_repos, ids):
         """Add-on subscription should become ACTIVE after payment."""
         addon_sub = _make_addon_sub(ids["addon"])
         li = _make_line_item(LineItemType.ADD_ON, ids["addon"], Decimal("4.99"))
@@ -434,7 +462,10 @@ class TestAddOnActivationE2E:
 
         checkout_obj = {
             "id": "cs_addon",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 499,
             "currency": "eur",
             "payment_intent": "pi_addon",
@@ -452,6 +483,7 @@ class TestAddOnActivationE2E:
 # Test: Mixed invoice (subscription + tokens + add-on)
 # ===========================================================================
 
+
 class TestMixedInvoiceE2E:
     """Full pipeline with invoice containing multiple line item types."""
 
@@ -464,8 +496,12 @@ class TestMixedInvoiceE2E:
         addon_sub = _make_addon_sub(ids["addon"])
 
         line_items = [
-            _make_line_item(LineItemType.SUBSCRIPTION, ids["subscription"], Decimal("19.99")),
-            _make_line_item(LineItemType.TOKEN_BUNDLE, ids["token_purchase"], Decimal("5.99")),
+            _make_line_item(
+                LineItemType.SUBSCRIPTION, ids["subscription"], Decimal("19.99")
+            ),
+            _make_line_item(
+                LineItemType.TOKEN_BUNDLE, ids["token_purchase"], Decimal("5.99")
+            ),
             _make_line_item(LineItemType.ADD_ON, ids["addon"], Decimal("3.99")),
         ]
         invoice = _make_invoice(ids["invoice"], ids["user"], line_items)
@@ -476,20 +512,27 @@ class TestMixedInvoiceE2E:
         mock_repos["invoice_repository"].find_by_id.return_value = invoice
         mock_repos["subscription_repository"].find_by_id.return_value = sub
         mock_repos["subscription_repository"].find_active_by_user.return_value = None
-        mock_repos["token_bundle_purchase_repository"].find_by_id.return_value = purchase
+        mock_repos[
+            "token_bundle_purchase_repository"
+        ].find_by_id.return_value = purchase
         mock_repos["token_balance_repository"].find_by_user_id.return_value = balance
         mock_repos["addon_subscription_repository"].find_by_id.return_value = addon_sub
 
         checkout_obj = {
             "id": "cs_mixed",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 2997,
             "currency": "eur",
             "payment_intent": "pi_mixed",
             "subscription": None,
         }
 
-        resp = _post_webhook(client, mock_stripe, "checkout.session.completed", checkout_obj)
+        resp = _post_webhook(
+            client, mock_stripe, "checkout.session.completed", checkout_obj
+        )
         assert resp.status_code == 200
 
         # All items activated
@@ -503,6 +546,7 @@ class TestMixedInvoiceE2E:
 # ===========================================================================
 # Test: Idempotency — webhook fires twice
 # ===========================================================================
+
 
 class TestIdempotencyE2E:
     """Verify double webhook delivery doesn't cause double activation."""
@@ -525,7 +569,10 @@ class TestIdempotencyE2E:
 
         checkout_obj = {
             "id": "cs_dupe",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 2999,
             "currency": "eur",
             "payment_intent": "pi_dupe",
@@ -544,6 +591,7 @@ class TestIdempotencyE2E:
 # Test: Stripe subscription linking
 # ===========================================================================
 
+
 class TestStripeSubscriptionLinking:
     """Verify provider_subscription_id is stored on our Subscription model."""
 
@@ -561,7 +609,10 @@ class TestStripeSubscriptionLinking:
 
         checkout_obj = {
             "id": "cs_recurring",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 2999,
             "currency": "eur",
             "payment_intent": "pi_recurring",
@@ -578,6 +629,7 @@ class TestStripeSubscriptionLinking:
 # Test: subscription.deleted webhook → SubscriptionCancelledEvent
 # ===========================================================================
 
+
 class TestSubscriptionDeletedE2E:
     """Verify customer.subscription.deleted emits SubscriptionCancelledEvent."""
 
@@ -589,7 +641,9 @@ class TestSubscriptionDeletedE2E:
             ids["subscription"], ids["user"], status=SubscriptionStatus.ACTIVE
         )
         sub.provider_subscription_id = "sub_stripe_del"
-        mock_repos["subscription_repository"].find_by_provider_subscription_id.return_value = sub
+        mock_repos[
+            "subscription_repository"
+        ].find_by_provider_subscription_id.return_value = sub
 
         # Track emitted events
         dispatcher = container_with_real_dispatcher.event_dispatcher.return_value
@@ -607,7 +661,9 @@ class TestSubscriptionDeletedE2E:
 
         stripe_sub_obj = {"id": "sub_stripe_del"}
 
-        resp = _post_webhook(client, mock_stripe, "customer.subscription.deleted", stripe_sub_obj)
+        resp = _post_webhook(
+            client, mock_stripe, "customer.subscription.deleted", stripe_sub_obj
+        )
         assert resp.status_code == 200
 
         # Should have emitted SubscriptionCancelledEvent
@@ -621,6 +677,7 @@ class TestSubscriptionDeletedE2E:
 # Test: invoice.payment_failed webhook → PaymentFailedEvent
 # ===========================================================================
 
+
 class TestPaymentFailedE2E:
     """Verify invoice.payment_failed emits PaymentFailedEvent."""
 
@@ -631,7 +688,9 @@ class TestPaymentFailedE2E:
         sub = _make_subscription(
             ids["subscription"], ids["user"], status=SubscriptionStatus.ACTIVE
         )
-        mock_repos["subscription_repository"].find_by_provider_subscription_id.return_value = sub
+        mock_repos[
+            "subscription_repository"
+        ].find_by_provider_subscription_id.return_value = sub
 
         dispatcher = container_with_real_dispatcher.event_dispatcher.return_value
         emitted = []
@@ -650,9 +709,13 @@ class TestPaymentFailedE2E:
             "subscription": "sub_stripe_fail",
             "last_payment_error": {"message": "Card declined"},
         }
-        mock_repos["subscription_repository"].find_by_provider_subscription_id.return_value = sub
+        mock_repos[
+            "subscription_repository"
+        ].find_by_provider_subscription_id.return_value = sub
 
-        resp = _post_webhook(client, mock_stripe, "invoice.payment_failed", stripe_invoice_obj)
+        resp = _post_webhook(
+            client, mock_stripe, "invoice.payment_failed", stripe_invoice_obj
+        )
         assert resp.status_code == 200
 
         assert len(emitted) == 1
@@ -665,6 +728,7 @@ class TestPaymentFailedE2E:
 # Test: Webhook returns 200 even when handler errors
 # ===========================================================================
 
+
 class TestWebhookResilience:
     """Webhook should always return 200 to prevent Stripe retries on app errors."""
 
@@ -676,27 +740,33 @@ class TestWebhookResilience:
 
         checkout_obj = {
             "id": "cs_missing",
-            "metadata": {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])},
+            "metadata": {
+                "invoice_id": str(ids["invoice"]),
+                "user_id": str(ids["user"]),
+            },
             "amount_total": 100,
             "currency": "eur",
             "payment_intent": "pi_missing",
             "subscription": None,
         }
 
-        resp = _post_webhook(client, mock_stripe, "checkout.session.completed", checkout_obj)
+        resp = _post_webhook(
+            client, mock_stripe, "checkout.session.completed", checkout_obj
+        )
         assert resp.status_code == 200
 
-    def test_returns_200_on_unknown_event_type(
-        self, client, mock_stripe, mock_repos
-    ):
+    def test_returns_200_on_unknown_event_type(self, client, mock_stripe, mock_repos):
         """Unknown Stripe event types should be ignored gracefully."""
-        resp = _post_webhook(client, mock_stripe, "some.unknown.event", {"id": "obj_123"})
+        resp = _post_webhook(
+            client, mock_stripe, "some.unknown.event", {"id": "obj_123"}
+        )
         assert resp.status_code == 200
 
 
 # ===========================================================================
 # Test: charge.refunded webhook → PaymentRefundedEvent
 # ===========================================================================
+
 
 class TestChargeRefundedE2E:
     """Verify charge.refunded emits PaymentRefundedEvent."""
@@ -719,7 +789,10 @@ class TestChargeRefundedE2E:
 
         # Mock stripe.checkout.Session.list to return session with invoice_id
         mock_session = MagicMock()
-        mock_session.metadata = {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])}
+        mock_session.metadata = {
+            "invoice_id": str(ids["invoice"]),
+            "user_id": str(ids["user"]),
+        }
         mock_stripe.checkout.Session.list.return_value = MagicMock(data=[mock_session])
 
         charge_obj = {
@@ -765,6 +838,7 @@ class TestChargeRefundedE2E:
 # Test: refund.updated webhook → RefundReversedEvent
 # ===========================================================================
 
+
 class TestRefundUpdatedE2E:
     """Verify refund.updated (status=canceled) emits RefundReversedEvent."""
 
@@ -786,7 +860,10 @@ class TestRefundUpdatedE2E:
 
         # Mock stripe.checkout.Session.list to return session with invoice_id
         mock_session = MagicMock()
-        mock_session.metadata = {"invoice_id": str(ids["invoice"]), "user_id": str(ids["user"])}
+        mock_session.metadata = {
+            "invoice_id": str(ids["invoice"]),
+            "user_id": str(ids["user"]),
+        }
         mock_stripe.checkout.Session.list.return_value = MagicMock(data=[mock_session])
 
         refund_obj = {

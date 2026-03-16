@@ -126,7 +126,9 @@ def _make_invoice(user_id, line_items, total_amount=Decimal("9.99"), currency="E
     return inv
 
 
-def _make_subscription_line_item(billing_period, plan_name="Pro Plan", unit_price=Decimal("9.99")):
+def _make_subscription_line_item(
+    billing_period, plan_name="Pro Plan", unit_price=Decimal("9.99")
+):
     """Create a mock subscription line item with a recurring plan."""
     li = MagicMock()
     li.item_type = LineItemType.SUBSCRIPTION
@@ -143,7 +145,9 @@ def _make_subscription_line_item(billing_period, plan_name="Pro Plan", unit_pric
     return li
 
 
-def _make_addon_line_item(billing_period_str, addon_name="Extra Storage", unit_price=Decimal("4.99")):
+def _make_addon_line_item(
+    billing_period_str, addon_name="Extra Storage", unit_price=Decimal("4.99")
+):
     """Create a mock add-on line item with a recurring add-on."""
     li = MagicMock()
     li.item_type = LineItemType.ADD_ON
@@ -344,7 +348,10 @@ class TestCreateSessionSubscriptionMode:
 
         # Verify mode=subscription was used
         call_kwargs = mock_stripe.checkout.Session.create.call_args
-        assert call_kwargs.kwargs.get("mode") == "subscription" or call_kwargs[1].get("mode") == "subscription"
+        assert (
+            call_kwargs.kwargs.get("mode") == "subscription"
+            or call_kwargs[1].get("mode") == "subscription"
+        )
 
     def test_create_session_reuses_customer(
         self, client, auth_headers, mock_container, mock_stripe, mocker
@@ -382,7 +389,9 @@ class TestCreateSessionSubscriptionMode:
 
         # Session.create should use existing customer_id
         call_kwargs = mock_stripe.checkout.Session.create.call_args
-        customer_arg = call_kwargs.kwargs.get("customer") or call_kwargs[1].get("customer")
+        customer_arg = call_kwargs.kwargs.get("customer") or call_kwargs[1].get(
+            "customer"
+        )
         assert customer_arg == "cus_existing_123"
 
 
@@ -422,7 +431,9 @@ class TestWebhookRecurring:
         sub_mock.provider_subscription_id = None
 
         mock_container.invoice_repository.return_value.find_by_id.return_value = invoice
-        mock_container.subscription_repository.return_value.find_by_id.return_value = sub_mock
+        mock_container.subscription_repository.return_value.find_by_id.return_value = (
+            sub_mock
+        )
 
         self._post_webhook(
             client,
@@ -439,7 +450,9 @@ class TestWebhookRecurring:
         )
 
         assert sub_mock.provider_subscription_id == "sub_stripe_123"
-        mock_container.subscription_repository.return_value.save.assert_called_with(sub_mock)
+        mock_container.subscription_repository.return_value.save.assert_called_with(
+            sub_mock
+        )
 
     def test_webhook_invoice_paid_creates_renewal(
         self, client, mock_stripe, mock_container, mocker
@@ -452,11 +465,17 @@ class TestWebhookRecurring:
         subscription.tarif_plan.id = uuid4()
         subscription.tarif_plan.name = "Pro"
 
-        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = subscription
-        mock_container.invoice_repository.return_value.find_by_provider_session_id.return_value = None
+        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = (
+            subscription
+        )
+        mock_container.invoice_repository.return_value.find_by_provider_session_id.return_value = (
+            None
+        )
 
         # Mock UserInvoice class and its generate_invoice_number
-        mock_invoice_cls = mocker.patch("plugins.stripe.routes.UserInvoice", autospec=False)
+        mock_invoice_cls = mocker.patch(
+            "plugins.stripe.routes.UserInvoice", autospec=False
+        )
         mock_invoice_instance = MagicMock()
         mock_invoice_instance.id = uuid4()
         mock_invoice_instance.line_items = []
@@ -512,11 +531,15 @@ class TestWebhookRecurring:
         subscription.user_id = uuid4()
         subscription.tarif_plan = MagicMock()
 
-        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = subscription
+        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = (
+            subscription
+        )
 
         existing_invoice = MagicMock()
         existing_invoice.id = uuid4()
-        mock_container.invoice_repository.return_value.find_by_provider_session_id.return_value = existing_invoice
+        mock_container.invoice_repository.return_value.find_by_provider_session_id.return_value = (
+            existing_invoice
+        )
 
         self._post_webhook(
             client,
@@ -544,7 +567,9 @@ class TestWebhookRecurring:
         subscription = MagicMock()
         subscription.id = uuid4()
         subscription.user_id = uuid4()
-        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = subscription
+        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = (
+            subscription
+        )
 
         self._post_webhook(
             client,
@@ -568,7 +593,9 @@ class TestWebhookRecurring:
         subscription = MagicMock()
         subscription.id = uuid4()
         subscription.user_id = uuid4()
-        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = subscription
+        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = (
+            subscription
+        )
 
         self._post_webhook(
             client,

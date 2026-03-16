@@ -140,7 +140,9 @@ class TestCreateSession:
         )
         assert resp.status_code == 404
 
-    def test_create_session_missing_invoice_id(self, client, auth_headers, mock_container):
+    def test_create_session_missing_invoice_id(
+        self, client, auth_headers, mock_container
+    ):
         """Should return 400 when invoice_id is missing or empty."""
         mock_container.invoice_repository.return_value.find_by_id.return_value = None
         resp = client.post(
@@ -150,7 +152,9 @@ class TestCreateSession:
         )
         assert resp.status_code == 400
 
-    def test_create_session_invoice_not_found(self, client, auth_headers, mock_container):
+    def test_create_session_invoice_not_found(
+        self, client, auth_headers, mock_container
+    ):
         """Should return 404 when invoice does not exist."""
         mock_container.invoice_repository.return_value.find_by_id.return_value = None
         resp = client.post(
@@ -160,7 +164,9 @@ class TestCreateSession:
         )
         assert resp.status_code == 404
 
-    def test_create_session_invoice_not_pending(self, client, auth_headers, mock_container):
+    def test_create_session_invoice_not_pending(
+        self, client, auth_headers, mock_container
+    ):
         """Should return 400 when invoice status is not pending."""
         invoice = MagicMock()
         invoice.id = uuid4()
@@ -190,7 +196,9 @@ class TestCreateSession:
         )
         assert resp.status_code == 403
 
-    def test_create_session_success(self, client, auth_headers, mock_container, mock_stripe):
+    def test_create_session_success(
+        self, client, auth_headers, mock_container, mock_stripe
+    ):
         """Should return 200 with session_id and session_url on success."""
         user_id = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         invoice = MagicMock()

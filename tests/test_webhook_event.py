@@ -122,7 +122,9 @@ class TestWebhookEmitsPaymentCapturedEvent:
         self, client, mock_stripe, mock_container, checkout_event
     ):
         """Webhook should call dispatcher.emit with a PaymentCapturedEvent."""
-        self._post_webhook(client, mock_stripe, "checkout.session.completed", checkout_event)
+        self._post_webhook(
+            client, mock_stripe, "checkout.session.completed", checkout_event
+        )
 
         dispatcher = mock_container.event_dispatcher.return_value
         dispatcher.emit.assert_called_once()
@@ -133,7 +135,9 @@ class TestWebhookEmitsPaymentCapturedEvent:
         self, client, mock_stripe, mock_container, checkout_event, invoice_id
     ):
         """Emitted event should have the correct invoice_id."""
-        self._post_webhook(client, mock_stripe, "checkout.session.completed", checkout_event)
+        self._post_webhook(
+            client, mock_stripe, "checkout.session.completed", checkout_event
+        )
 
         event = mock_container.event_dispatcher.return_value.emit.call_args[0][0]
         assert str(event.invoice_id) == invoice_id
@@ -142,7 +146,9 @@ class TestWebhookEmitsPaymentCapturedEvent:
         self, client, mock_stripe, mock_container, checkout_event
     ):
         """Emitted event amount should be amount_total / 100 as string."""
-        self._post_webhook(client, mock_stripe, "checkout.session.completed", checkout_event)
+        self._post_webhook(
+            client, mock_stripe, "checkout.session.completed", checkout_event
+        )
 
         event = mock_container.event_dispatcher.return_value.emit.call_args[0][0]
         assert event.amount == str(2999 / 100)
@@ -151,7 +157,9 @@ class TestWebhookEmitsPaymentCapturedEvent:
         self, client, mock_stripe, mock_container, checkout_event
     ):
         """Emitted event provider should be 'stripe'."""
-        self._post_webhook(client, mock_stripe, "checkout.session.completed", checkout_event)
+        self._post_webhook(
+            client, mock_stripe, "checkout.session.completed", checkout_event
+        )
 
         event = mock_container.event_dispatcher.return_value.emit.call_args[0][0]
         assert event.provider == "stripe"
@@ -160,7 +168,9 @@ class TestWebhookEmitsPaymentCapturedEvent:
         self, client, mock_stripe, mock_container, checkout_event
     ):
         """Emitted event transaction_id should match payment_intent."""
-        self._post_webhook(client, mock_stripe, "checkout.session.completed", checkout_event)
+        self._post_webhook(
+            client, mock_stripe, "checkout.session.completed", checkout_event
+        )
 
         event = mock_container.event_dispatcher.return_value.emit.call_args[0][0]
         assert event.transaction_id == "pi_test_xyz"
@@ -169,7 +179,9 @@ class TestWebhookEmitsPaymentCapturedEvent:
         self, client, mock_stripe, mock_container, checkout_event
     ):
         """Webhook should NOT call save/update on invoice or subscription repos."""
-        self._post_webhook(client, mock_stripe, "checkout.session.completed", checkout_event)
+        self._post_webhook(
+            client, mock_stripe, "checkout.session.completed", checkout_event
+        )
 
         invoice_repo = mock_container.invoice_repository.return_value
         sub_repo = mock_container.subscription_repository.return_value
