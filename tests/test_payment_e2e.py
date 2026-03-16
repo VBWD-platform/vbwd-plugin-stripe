@@ -89,14 +89,21 @@ def _make_subscription(
     sub.id = sub_id
     sub.user_id = user_id
     sub.status = status
+    sub.started_at = None
     sub.starts_at = None
     sub.expires_at = None
     sub.cancelled_at = None
     sub.provider_subscription_id = None
+    # Set up a single is_single category so the handler can detect conflicts
+    category = MagicMock()
+    category.is_single = True
     plan = MagicMock()
     plan.name = "Pro Plan"
     plan.is_recurring = is_recurring
     plan.billing_period = BillingPeriod.MONTHLY
+    plan.categories = [category]
+    plan.tarif_plans = []
+    category.tarif_plans = [plan]
     sub.tarif_plan = plan
     return sub
 
@@ -317,7 +324,7 @@ class TestCheckoutCompletedE2E:
         _post_webhook(client, mock_stripe, "checkout.session.completed", checkout_obj)
 
         assert sub.status == SubscriptionStatus.ACTIVE
-        assert sub.starts_at is not None
+        assert sub.started_at is not None
         assert sub.expires_at is not None
         mock_repos["subscription_repository"].save.assert_called()
 
@@ -335,7 +342,7 @@ class TestCheckoutCompletedE2E:
 
         mock_repos["invoice_repository"].find_by_id.return_value = invoice
         mock_repos["subscription_repository"].find_by_id.return_value = new_sub
-        mock_repos["subscription_repository"].find_active_by_user.return_value = old_sub
+        mock_repos["subscription_repository"].find_active_by_user_in_category.return_value = [old_sub]
 
         checkout_obj = {
             "id": "cs_upgrade",
