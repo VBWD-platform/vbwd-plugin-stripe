@@ -44,3 +44,13 @@ No plugin-owned tables. Uses core `UserInvoice`, `Subscription` models.
 ```bash
 docker compose run --rm test python -m pytest plugins/stripe/tests/ -v
 ```
+
+---
+
+## Related
+
+| | Repository |
+|-|------------|
+| 👤 Frontend (user) | [vbwd-fe-user-plugin-stripe-payment](https://github.com/VBWD-platform/vbwd-fe-user-plugin-stripe-payment) |
+
+**Core:** [vbwd-backend](https://github.com/VBWD-platform/vbwd-backend)
