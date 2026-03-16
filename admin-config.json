@@ -1,0 +1,29 @@
+{
+  "tabs": [
+    {
+      "id": "mode",
+      "label": "Mode",
+      "fields": [
+        { "key": "sandbox", "label": "Test Mode", "component": "checkbox" }
+      ]
+    },
+    {
+      "id": "test-credentials",
+      "label": "Test Credentials",
+      "fields": [
+        { "key": "test_publishable_key", "label": "Publishable Key", "component": "input", "inputType": "text" },
+        { "key": "test_secret_key", "label": "Secret Key", "component": "input", "inputType": "password" },
+        { "key": "test_webhook_secret", "label": "Webhook Secret", "component": "input", "inputType": "password" }
+      ]
+    },
+    {
+      "id": "live-credentials",
+      "label": "Live Credentials",
+      "fields": [
+        { "key": "live_publishable_key", "label": "Publishable Key", "component": "input", "inputType": "text" },
+        { "key": "live_secret_key", "label": "Secret Key", "component": "input", "inputType": "password" },
+        { "key": "live_webhook_secret", "label": "Webhook Secret", "component": "input", "inputType": "password" }
+      ]
+    }
+  ]
+}

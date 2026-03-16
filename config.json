@@ -1,0 +1,37 @@
+{
+  "sandbox": {
+    "type": "boolean",
+    "default": true,
+    "description": "Use Stripe test mode"
+  },
+  "test_publishable_key": {
+    "type": "string",
+    "default": "",
+    "description": "Stripe test publishable key (pk_test_...)"
+  },
+  "test_secret_key": {
+    "type": "string",
+    "default": "",
+    "description": "Stripe test secret key (sk_test_...)"
+  },
+  "test_webhook_secret": {
+    "type": "string",
+    "default": "",
+    "description": "Stripe test webhook signing secret (whsec_...)"
+  },
+  "live_publishable_key": {
+    "type": "string",
+    "default": "",
+    "description": "Stripe live publishable key (pk_live_...)"
+  },
+  "live_secret_key": {
+    "type": "string",
+    "default": "",
+    "description": "Stripe live secret key (sk_live_...)"
+  },
+  "live_webhook_secret": {
+    "type": "string",
+    "default": "",
+    "description": "Stripe live webhook signing secret (whsec_...)"
+  }
+}
