@@ -69,18 +69,6 @@ jobs:
         working-directory: vbwd-backend
         run: docker compose up -d --build
 
-      - name: Wait for API health
-        run: |
-          echo "Waiting for API..."
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:5000/api/v1/health > /dev/null 2>&1; then
-              echo "API ready after ${i} attempts."
-              break
-            fi
-            [ $i -eq 30 ] && echo "API did not become healthy." && exit 1
-            sleep 3
-          done
-
       # ── 5. Install and activate plugin ────────────────────────────────────
       - name: Enable plugin
         working-directory: vbwd-backend
