@@ -10,12 +10,11 @@ PaymentCapturedHandler, using mock repositories. This verifies
 the event system actually connects webhook → handler → domain changes.
 """
 import sys
-import json
 import pytest
-from uuid import uuid4, UUID
+from uuid import uuid4
 from decimal import Decimal
 from datetime import datetime
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
 from flask import Flask
 

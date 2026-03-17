@@ -4,7 +4,7 @@ import pytest
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from src.sdk.interface import SDKConfig, SDKResponse
+from src.sdk.interface import SDKConfig
 from src.sdk.base import BaseSDKAdapter
 
 

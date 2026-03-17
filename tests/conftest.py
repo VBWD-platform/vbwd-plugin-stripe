@@ -1,7 +1,6 @@
 """Shared fixtures for Stripe plugin tests."""
 import sys
 import pytest
-from unittest.mock import MagicMock
 
 from src.sdk.interface import SDKConfig
 from src.plugins.config_store import PluginConfigEntry

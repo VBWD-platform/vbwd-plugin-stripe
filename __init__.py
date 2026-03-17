@@ -2,7 +2,7 @@
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from decimal import Decimal
 from uuid import UUID
-from src.plugins.base import BasePlugin, PluginMetadata
+from src.plugins.base import PluginMetadata
 from src.plugins.payment_provider import (
     PaymentProviderPlugin,
     PaymentResult,

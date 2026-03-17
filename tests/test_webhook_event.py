@@ -4,12 +4,11 @@ The Stripe webhook route should ONLY emit domain events and NEVER
 mutate domain objects (invoices, subscriptions) directly.
 """
 import sys
-import json
 import pytest
-from uuid import uuid4, UUID
-from unittest.mock import MagicMock, call
+from uuid import uuid4
+from unittest.mock import MagicMock
 
-from flask import Flask, g
+from flask import Flask
 
 from src.plugins.config_store import PluginConfigEntry
 from src.events.payment_events import PaymentCapturedEvent
