@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 from flask import Flask
 
-from src.plugins.config_store import PluginConfigEntry
-from src.models.enums import InvoiceStatus
+from vbwd.plugins.config_store import PluginConfigEntry
+from vbwd.models.enums import InvoiceStatus
 
 
 @pytest.fixture
@@ -78,7 +78,7 @@ def app(mock_stripe, mock_config_store, mock_container, mocker):
 
     mock_auth_service = MagicMock()
     mock_auth_service.return_value.verify_token.return_value = str(user_id)
-    mocker.patch("src.middleware.auth.AuthService", mock_auth_service)
+    mocker.patch("vbwd.middleware.auth.AuthService", mock_auth_service)
 
     mock_user = MagicMock()
     mock_user.id = user_id
@@ -86,10 +86,10 @@ def app(mock_stripe, mock_config_store, mock_container, mocker):
 
     mock_user_repo = MagicMock()
     mock_user_repo.return_value.find_by_id.return_value = mock_user
-    mocker.patch("src.middleware.auth.UserRepository", mock_user_repo)
+    mocker.patch("vbwd.middleware.auth.UserRepository", mock_user_repo)
 
     mock_db = MagicMock()
-    mocker.patch("src.middleware.auth.db", mock_db)
+    mocker.patch("vbwd.middleware.auth.db", mock_db)
 
     from plugins.stripe.routes import stripe_plugin_bp
 

@@ -4,8 +4,8 @@ import pytest
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from src.sdk.interface import SDKConfig
-from src.sdk.base import BaseSDKAdapter
+from vbwd.sdk.interface import SDKConfig
+from vbwd.sdk.base import BaseSDKAdapter
 
 
 @pytest.fixture

@@ -2,8 +2,8 @@
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from decimal import Decimal
 from uuid import UUID
-from src.plugins.base import PluginMetadata
-from src.plugins.payment_provider import (
+from vbwd.plugins.base import PluginMetadata
+from vbwd.plugins.payment_provider import (
     PaymentProviderPlugin,
     PaymentResult,
     PaymentStatus,
@@ -48,7 +48,7 @@ class StripePlugin(PaymentProviderPlugin):
         """Instantiate StripeSDKAdapter from config_store (per-request)."""
         from flask import current_app
         from plugins.stripe.sdk_adapter import StripeSDKAdapter
-        from src.sdk.interface import SDKConfig
+        from vbwd.sdk.interface import SDKConfig
 
         config_store = current_app.config_store
         config = config_store.get_config("stripe")

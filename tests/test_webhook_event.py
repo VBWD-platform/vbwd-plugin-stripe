@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 
 from flask import Flask
 
-from src.plugins.config_store import PluginConfigEntry
-from src.events.payment_events import PaymentCapturedEvent
+from vbwd.plugins.config_store import PluginConfigEntry
+from vbwd.events.payment_events import PaymentCapturedEvent
 
 
 @pytest.fixture
@@ -62,14 +62,14 @@ def app(mock_stripe, mock_config_store, mock_container, mocker):
     # Mock auth machinery for require_auth-decorated routes
     mock_auth_service = MagicMock()
     mock_auth_service.return_value.verify_token.return_value = str(uuid4())
-    mocker.patch("src.middleware.auth.AuthService", mock_auth_service)
+    mocker.patch("vbwd.middleware.auth.AuthService", mock_auth_service)
 
     mock_user = MagicMock()
     mock_user.status.value = "ACTIVE"
     mock_user_repo = MagicMock()
     mock_user_repo.return_value.find_by_id.return_value = mock_user
-    mocker.patch("src.middleware.auth.UserRepository", mock_user_repo)
-    mocker.patch("src.middleware.auth.db", MagicMock())
+    mocker.patch("vbwd.middleware.auth.UserRepository", mock_user_repo)
+    mocker.patch("vbwd.middleware.auth.db", MagicMock())
 
     from plugins.stripe.routes import stripe_plugin_bp
 

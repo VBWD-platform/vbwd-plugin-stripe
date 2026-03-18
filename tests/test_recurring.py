@@ -13,13 +13,13 @@ from unittest.mock import MagicMock
 
 from flask import Flask
 
-from src.plugins.config_store import PluginConfigEntry
-from src.models.enums import (
+from vbwd.plugins.config_store import PluginConfigEntry
+from vbwd.models.enums import (
     InvoiceStatus,
     LineItemType,
     BillingPeriod,
 )
-from src.events.payment_events import (
+from vbwd.events.payment_events import (
     SubscriptionCancelledEvent,
     PaymentFailedEvent,
 )
@@ -78,7 +78,7 @@ def app(mock_stripe, mock_config_store, mock_container, mocker):
 
     mock_auth_service = MagicMock()
     mock_auth_service.return_value.verify_token.return_value = str(user_id)
-    mocker.patch("src.middleware.auth.AuthService", mock_auth_service)
+    mocker.patch("vbwd.middleware.auth.AuthService", mock_auth_service)
 
     mock_user = MagicMock()
     mock_user.id = user_id
@@ -86,10 +86,10 @@ def app(mock_stripe, mock_config_store, mock_container, mocker):
 
     mock_user_repo = MagicMock()
     mock_user_repo.return_value.find_by_id.return_value = mock_user
-    mocker.patch("src.middleware.auth.UserRepository", mock_user_repo)
+    mocker.patch("vbwd.middleware.auth.UserRepository", mock_user_repo)
 
     mock_auth_db = MagicMock()
-    mocker.patch("src.middleware.auth.db", mock_auth_db)
+    mocker.patch("vbwd.middleware.auth.db", mock_auth_db)
 
     from plugins.stripe.routes import stripe_plugin_bp
 
@@ -180,14 +180,14 @@ class TestDetermineSessionMode:
 
     def test_determine_mode_recurring_plan(self, app, mocker):
         """Should return 'subscription' for monthly recurring plan."""
-        from src.plugins.payment_route_helpers import determine_session_mode
+        from vbwd.plugins.payment_route_helpers import determine_session_mode
 
         sub_li = _make_subscription_line_item(BillingPeriod.MONTHLY)
 
         invoice = MagicMock()
         invoice.line_items = [sub_li]
 
-        mock_db = mocker.patch("src.plugins.payment_route_helpers.db")
+        mock_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
         mock_db.session.get.return_value = sub_li._sub
 
         with app.app_context():
@@ -196,13 +196,13 @@ class TestDetermineSessionMode:
 
     def test_determine_mode_one_time_plan(self, app, mocker):
         """Should return 'payment' for one-time (token bundle) items."""
-        from src.plugins.payment_route_helpers import determine_session_mode
+        from vbwd.plugins.payment_route_helpers import determine_session_mode
 
         li = _make_one_time_line_item()
         invoice = MagicMock()
         invoice.line_items = [li]
 
-        mock_db = mocker.patch("src.plugins.payment_route_helpers.db")
+        mock_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
         mock_db.session.get.return_value = None
 
         with app.app_context():
@@ -211,13 +211,13 @@ class TestDetermineSessionMode:
 
     def test_determine_mode_recurring_addon(self, app, mocker):
         """Should return 'subscription' for recurring add-on."""
-        from src.plugins.payment_route_helpers import determine_session_mode
+        from vbwd.plugins.payment_route_helpers import determine_session_mode
 
         addon_li = _make_addon_line_item("monthly")
         invoice = MagicMock()
         invoice.line_items = [addon_li]
 
-        mock_db = mocker.patch("src.plugins.payment_route_helpers.db")
+        mock_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
         mock_db.session.get.return_value = addon_li._addon_sub
 
         with app.app_context():
@@ -226,14 +226,14 @@ class TestDetermineSessionMode:
 
     def test_determine_mode_mixed_one_time(self, app, mocker):
         """Should return 'payment' when all items are one-time tokens."""
-        from src.plugins.payment_route_helpers import determine_session_mode
+        from vbwd.plugins.payment_route_helpers import determine_session_mode
 
         li1 = _make_one_time_line_item()
         li2 = _make_one_time_line_item()
         invoice = MagicMock()
         invoice.line_items = [li1, li2]
 
-        mock_db = mocker.patch("src.plugins.payment_route_helpers.db")
+        mock_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
         mock_db.session.get.return_value = None
 
         with app.app_context():
@@ -322,7 +322,7 @@ class TestCreateSessionSubscriptionMode:
         # payment_route_helpers uses it for determine_session_mode)
         mock_db = mocker.patch("plugins.stripe.routes.db")
         mock_db.session.get.return_value = li._sub
-        mock_helpers_db = mocker.patch("src.plugins.payment_route_helpers.db")
+        mock_helpers_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
         mock_helpers_db.session.get.return_value = li._sub
 
         # Mock user with existing payment_customer_id
@@ -363,7 +363,7 @@ class TestCreateSessionSubscriptionMode:
 
         mock_db = mocker.patch("plugins.stripe.routes.db")
         mock_db.session.get.return_value = li._sub
-        mock_helpers_db = mocker.patch("src.plugins.payment_route_helpers.db")
+        mock_helpers_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
         mock_helpers_db.session.get.return_value = li._sub
 
         user = MagicMock()
@@ -628,7 +628,7 @@ class TestBillingPeriodToStripeDaily:
 
     def test_build_subscription_items_daily(self, app, mocker):
         from plugins.stripe.routes import _build_stripe_subscription_items
-        from src.models.enums import BillingPeriod
+        from vbwd.models.enums import BillingPeriod
 
         li = _make_subscription_line_item(BillingPeriod.DAILY)
         invoice = MagicMock()
