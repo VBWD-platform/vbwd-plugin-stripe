@@ -30,12 +30,37 @@ class StripeSDKAdapter(BaseSDKAdapter):
         currency: str,
         metadata: Dict[str, Any],
         idempotency_key: Optional[str] = None,
+        capture: bool = True,
     ) -> SDKResponse:
-        """Create a one-time Stripe Checkout Session (mode=payment)."""
+        """Create a Stripe payment.
+
+        When capture=True: uses Checkout Session (redirect-based, auto-capture).
+        When capture=False: uses Payment Intent with manual capture (authorize only).
+        """
 
         def _create():
             try:
                 unit_amount = int(amount * 100)
+
+                if not capture:
+                    # Authorize only — use Payment Intents API with manual capture
+                    intent = self._stripe.PaymentIntent.create(
+                        amount=unit_amount,
+                        currency=currency.lower(),
+                        metadata=metadata,
+                        capture_method="manual",
+                    )
+                    return SDKResponse(
+                        success=True,
+                        data={
+                            "session_id": intent.id,
+                            "payment_intent_id": intent.id,
+                            "client_secret": intent.client_secret,
+                            "capture_method": "manual",
+                        },
+                    )
+
+                # Immediate capture — use Checkout Sessions (existing flow)
                 success_url = metadata.pop("success_url", "")
                 cancel_url = metadata.pop("cancel_url", "")
                 session = self._stripe.checkout.Session.create(
@@ -124,12 +149,29 @@ class StripeSDKAdapter(BaseSDKAdapter):
             )
 
     def capture_payment(
-        self, payment_intent_id: str, idempotency_key: Optional[str] = None
+        self,
+        payment_intent_id: str,
+        amount: Optional[Decimal] = None,
+        idempotency_key: Optional[str] = None,
     ) -> SDKResponse:
-        """Retrieve session status (capture is implicit with Checkout Sessions)."""
+        """Capture a previously authorized Payment Intent, or retrieve session status."""
 
         def _capture():
             try:
+                # Try as Payment Intent first (authorize-then-capture flow)
+                if payment_intent_id.startswith("pi_"):
+                    params = {}
+                    if amount is not None:
+                        params["amount_to_capture"] = int(amount * 100)
+                    intent = self._stripe.PaymentIntent.capture(
+                        payment_intent_id, **params
+                    )
+                    return SDKResponse(
+                        success=True,
+                        data={"status": intent.status, "payment_intent_id": intent.id},
+                    )
+
+                # Fallback: Checkout Session (legacy flow — capture is implicit)
                 session = self._stripe.checkout.Session.retrieve(payment_intent_id)
                 return SDKResponse(
                     success=True,
@@ -141,6 +183,19 @@ class StripeSDKAdapter(BaseSDKAdapter):
                 )
 
         return self._with_idempotency(idempotency_key, _capture)
+
+    def release_authorization(self, payment_intent_id: str) -> SDKResponse:
+        """Cancel/void a previously authorized Payment Intent."""
+        try:
+            intent = self._stripe.PaymentIntent.cancel(payment_intent_id)
+            return SDKResponse(
+                success=True,
+                data={"status": intent.status, "payment_intent_id": intent.id},
+            )
+        except self._stripe.error.StripeError as e:
+            return SDKResponse(
+                success=False, error=str(e), error_code=getattr(e, "code", None)
+            )
 
     def refund_payment(
         self,

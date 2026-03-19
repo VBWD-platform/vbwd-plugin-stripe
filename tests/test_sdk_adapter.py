@@ -19,7 +19,7 @@ def mock_stripe(mocker):
 @pytest.fixture
 def adapter(mock_stripe):
     """Create StripeSDKAdapter with mocked stripe module."""
-    from plugins.stripe.sdk_adapter import StripeSDKAdapter
+    from plugins.stripe.stripe.sdk_adapter import StripeSDKAdapter
 
     config = SDKConfig(api_key="sk_test_123", sandbox=True)
     return StripeSDKAdapter(config)

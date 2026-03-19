@@ -91,7 +91,7 @@ def app(mock_stripe, mock_config_store, mock_container, mocker):
     mock_auth_db = MagicMock()
     mocker.patch("vbwd.middleware.auth.db", mock_auth_db)
 
-    from plugins.stripe.routes import stripe_plugin_bp
+    from plugins.stripe.stripe.routes import stripe_plugin_bp
 
     flask_app.register_blueprint(stripe_plugin_bp, url_prefix="/api/v1/plugins/stripe")
     flask_app.config_store = mock_config_store
@@ -249,14 +249,14 @@ class TestBuildSubscriptionItems:
 
     def test_build_subscription_items_monthly(self, app, mocker):
         """Monthly plan should produce interval='month'."""
-        from plugins.stripe.routes import _build_stripe_subscription_items
+        from plugins.stripe.stripe.routes import _build_stripe_subscription_items
 
         li = _make_subscription_line_item(BillingPeriod.MONTHLY)
         invoice = MagicMock()
         invoice.line_items = [li]
         invoice.currency = "EUR"
 
-        mock_db = mocker.patch("plugins.stripe.routes.db")
+        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
         mock_db.session.get.return_value = li._sub
 
         with app.app_context():
@@ -267,14 +267,14 @@ class TestBuildSubscriptionItems:
 
     def test_build_subscription_items_yearly(self, app, mocker):
         """Yearly plan should produce interval='year'."""
-        from plugins.stripe.routes import _build_stripe_subscription_items
+        from plugins.stripe.stripe.routes import _build_stripe_subscription_items
 
         li = _make_subscription_line_item(BillingPeriod.YEARLY)
         invoice = MagicMock()
         invoice.line_items = [li]
         invoice.currency = "EUR"
 
-        mock_db = mocker.patch("plugins.stripe.routes.db")
+        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
         mock_db.session.get.return_value = li._sub
 
         with app.app_context():
@@ -284,14 +284,14 @@ class TestBuildSubscriptionItems:
 
     def test_build_subscription_items_quarterly(self, app, mocker):
         """Quarterly plan should produce interval_count=3 with interval='month'."""
-        from plugins.stripe.routes import _build_stripe_subscription_items
+        from plugins.stripe.stripe.routes import _build_stripe_subscription_items
 
         li = _make_subscription_line_item(BillingPeriod.QUARTERLY)
         invoice = MagicMock()
         invoice.line_items = [li]
         invoice.currency = "USD"
 
-        mock_db = mocker.patch("plugins.stripe.routes.db")
+        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
         mock_db.session.get.return_value = li._sub
 
         with app.app_context():
@@ -320,7 +320,7 @@ class TestCreateSessionSubscriptionMode:
 
         # Mock db in both modules (routes uses it for _build_stripe_subscription_items,
         # payment_route_helpers uses it for determine_session_mode)
-        mock_db = mocker.patch("plugins.stripe.routes.db")
+        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
         mock_db.session.get.return_value = li._sub
         mock_helpers_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
         mock_helpers_db.session.get.return_value = li._sub
@@ -361,7 +361,7 @@ class TestCreateSessionSubscriptionMode:
 
         mock_container.invoice_repository.return_value.find_by_id.return_value = invoice
 
-        mock_db = mocker.patch("plugins.stripe.routes.db")
+        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
         mock_db.session.get.return_value = li._sub
         mock_helpers_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
         mock_helpers_db.session.get.return_value = li._sub
@@ -472,7 +472,7 @@ class TestWebhookRecurring:
 
         # Mock UserInvoice class and its generate_invoice_number
         mock_invoice_cls = mocker.patch(
-            "plugins.stripe.routes.UserInvoice", autospec=False
+            "plugins.stripe.stripe.routes.UserInvoice", autospec=False
         )
         mock_invoice_instance = MagicMock()
         mock_invoice_instance.id = uuid4()
@@ -481,7 +481,7 @@ class TestWebhookRecurring:
         mock_invoice_cls.generate_invoice_number.return_value = "INV-001"
 
         # Mock InvoiceLineItem
-        mocker.patch("plugins.stripe.routes.InvoiceLineItem", MagicMock)
+        mocker.patch("plugins.stripe.stripe.routes.InvoiceLineItem", MagicMock)
 
         self._post_webhook(
             client,
@@ -621,13 +621,13 @@ class TestBillingPeriodToStripeDaily:
     """Tests that DAILY billing period maps to interval=day in Stripe."""
 
     def test_daily_period_maps_to_day_interval(self):
-        from plugins.stripe.routes import BILLING_PERIOD_TO_STRIPE
+        from plugins.stripe.stripe.routes import BILLING_PERIOD_TO_STRIPE
 
         assert "DAILY" in BILLING_PERIOD_TO_STRIPE
         assert BILLING_PERIOD_TO_STRIPE["DAILY"]["interval"] == "day"
 
     def test_build_subscription_items_daily(self, app, mocker):
-        from plugins.stripe.routes import _build_stripe_subscription_items
+        from plugins.stripe.stripe.routes import _build_stripe_subscription_items
         from vbwd.models.enums import BillingPeriod
 
         li = _make_subscription_line_item(BillingPeriod.DAILY)
@@ -635,7 +635,7 @@ class TestBillingPeriodToStripeDaily:
         invoice.line_items = [li]
         invoice.currency = "EUR"
 
-        mock_db = mocker.patch("plugins.stripe.routes.db")
+        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
         mock_db.session.get.return_value = li._sub
 
         with app.app_context():

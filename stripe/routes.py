@@ -42,7 +42,7 @@ BILLING_PERIOD_TO_STRIPE = {
 
 def _get_adapter(config):
     """Instantiate StripeSDKAdapter from plugin config."""
-    from plugins.stripe.sdk_adapter import StripeSDKAdapter
+    from plugins.stripe.stripe.sdk_adapter import StripeSDKAdapter
 
     prefix = "test_" if config.get("sandbox", True) else "live_"
     return StripeSDKAdapter(

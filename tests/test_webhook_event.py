@@ -71,7 +71,7 @@ def app(mock_stripe, mock_config_store, mock_container, mocker):
     mocker.patch("vbwd.middleware.auth.UserRepository", mock_user_repo)
     mocker.patch("vbwd.middleware.auth.db", MagicMock())
 
-    from plugins.stripe.routes import stripe_plugin_bp
+    from plugins.stripe.stripe.routes import stripe_plugin_bp
 
     flask_app.register_blueprint(stripe_plugin_bp, url_prefix="/api/v1/plugins/stripe")
     flask_app.config_store = mock_config_store
