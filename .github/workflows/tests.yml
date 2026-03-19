@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. Clone vbwd-backend ──────────────────────────────────────────────
       - name: Clone vbwd-backend
         uses: actions/checkout@v4
         with:
@@ -21,107 +20,32 @@ jobs:
           ref: main
           path: vbwd-backend
 
-      # ── 2. Clone plugin directly into vbwd-backend/plugins/stripe ────
       - name: Clone plugin
         uses: actions/checkout@v4
         with:
           path: vbwd-backend/plugins/stripe
 
-      # ── 3. Style checks (black · flake8 · mypy) ───────────────────────────
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
           cache-dependency-path: vbwd-backend/requirements.txt
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r vbwd-backend/requirements.txt
+      - run: pip install -r vbwd-backend/requirements.txt
 
-      - name: Style check — Black
-        run: |
-          black --check --diff \
-            vbwd-backend/plugins/stripe/ \
-            --exclude='/(\.git|\.github|__pycache__|\.pytest_cache)/'
-
-      - name: Style check — Flake8
-        run: |
-          flake8 vbwd-backend/plugins/stripe/ \
-            --max-line-length=120 \
-            --extend-ignore=E203,W503 \
-            --exclude=.git,.github,__pycache__,.pytest_cache
-
-      - name: Style check — Mypy
-        run: |
-          PLUGIN_SRC=vbwd-backend/plugins/stripe/src
-          if [ -d "$PLUGIN_SRC" ]; then
-            mypy "$PLUGIN_SRC" \
-              --ignore-missing-imports \
-              --no-error-summary \
-              --python-version=3.11
-          else
-            echo "No src/ directory — skipping mypy."
-          fi
-
-      # ── 4. Start docker compose stack (API + postgres + redis) ────────────
       - name: Start services
         working-directory: vbwd-backend
         run: docker compose up -d --build
 
-      # ── 5. Install and activate plugin ────────────────────────────────────
-      - name: Enable plugin
+      - name: Wait for API
         working-directory: vbwd-backend
         run: |
-          docker compose exec -T api flask plugins enable stripe \
-            && echo "Plugin stripe enabled." \
-            || echo "Plugin stripe already enabled or not registerable — continuing."
+          for i in $(seq 1 30); do curl -sf http://localhost:5000/api/v1/health > /dev/null 2>&1 && break; sleep 2; done
 
-      # ── 6. Unit tests ──────────────────────────────────────────────────────
-      - name: Run unit tests
+      - name: Run pre-commit (lint + unit)
         working-directory: vbwd-backend
-        run: |
-          mkdir -p test-results
-          if [ -d "plugins/stripe/tests/unit" ]; then
-            TESTS_DIR="plugins/stripe/tests/unit/"
-          elif [ -d "plugins/stripe/tests" ]; then
-            TESTS_DIR="plugins/stripe/tests/"
-            IGNORE="--ignore=plugins/stripe/tests/integration/"
-          else
-            echo "No unit tests — skipping."
-            exit 0
-          fi
-          docker compose --profile test run --rm -T test \
-            pytest $TESTS_DIR ${IGNORE:-} \
-            -v --tb=short \
-            --junit-xml=/app/test-results/unit.xml
+        run: docker compose run --rm test ./bin/pre-commit-check.sh --plugin stripe --quick
 
-      # ── 7. Integration tests ───────────────────────────────────────────────
-      - name: Run integration tests
-        if: always()
-        working-directory: vbwd-backend
-        run: |
-          if [ -d "plugins/stripe/tests/integration" ]; then
-            docker compose --profile test run --rm -T test \
-              pytest plugins/stripe/tests/integration/ \
-              -v --tb=short \
-              --junit-xml=/app/test-results/integration.xml
-          else
-            echo "No integration tests — skipping."
-          fi
-
-      # ── 8. Upload artifacts ────────────────────────────────────────────────
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-stripe-${{ github.run_number }}
-          path: vbwd-backend/test-results/
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # ── 9. Cleanup ─────────────────────────────────────────────────────────
       - name: Cleanup
         if: always()
         working-directory: vbwd-backend
