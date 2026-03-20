@@ -46,6 +46,16 @@ jobs:
         working-directory: vbwd-backend
         run: docker compose run --rm test ./bin/pre-commit-check.sh --plugin stripe --quick
 
+      - name: Run integration tests
+        if: always()
+        working-directory: vbwd-backend
+        run: |
+          if [ -d "plugins/stripe/tests/integration" ]; then
+            docker compose run --rm test pytest plugins/stripe/tests/integration/ -v --tb=short
+          else
+            echo "No integration tests yet — skipping"
+          fi
+
       - name: Cleanup
         if: always()
         working-directory: vbwd-backend
