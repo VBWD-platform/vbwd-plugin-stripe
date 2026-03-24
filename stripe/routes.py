@@ -144,7 +144,12 @@ def create_session():
             cancel_url=cancel_url,
         )
     else:
-        # One-time: standard payment session
+        # One-time: check if authorize-only or immediate capture
+        from vbwd.plugins.payment_route_helpers import determine_capture_method
+
+        capture_method = determine_capture_method(invoice)
+        capture = capture_method != "manual"
+
         meta = {
             **base_meta,
             "success_url": success_url,
@@ -154,6 +159,7 @@ def create_session():
             amount=Decimal(str(invoice.total_amount or invoice.amount)),
             currency=(invoice.currency or "EUR"),
             metadata=meta,
+            capture=capture,
         )
 
     if not response.success:
@@ -212,7 +218,7 @@ def stripe_webhook():
 
 
 def _handle_checkout_completed(session):
-    """Handle initial checkout.session.completed — emit PaymentCapturedEvent."""
+    """Handle checkout.session.completed — emit captured or authorized event."""
     metadata = session.get("metadata", {})
     invoice_id = metadata.get("invoice_id")
     if not invoice_id:
@@ -223,15 +229,31 @@ def _handle_checkout_completed(session):
     if stripe_sub_id:
         _link_stripe_subscription(UUID(invoice_id), stripe_sub_id)
 
-    # Event-driven: emit, don't act
-    emit_payment_captured(
-        invoice_id=UUID(invoice_id),
-        payment_reference=session["id"],
-        amount=str(session["amount_total"] / 100),
-        currency=session.get("currency", "usd"),
-        provider="stripe",
-        transaction_id=session.get("payment_intent", ""),
-    )
+    payment_status = session.get("payment_status", "paid")
+    payment_intent_id = session.get("payment_intent", "")
+
+    if payment_status == "unpaid":
+        # Authorize-only (capture_method=manual) — funds held, not charged
+        from vbwd.plugins.payment_route_helpers import emit_payment_authorized
+
+        emit_payment_authorized(
+            invoice_id=UUID(invoice_id),
+            payment_reference=session["id"],
+            amount=str(session["amount_total"] / 100),
+            currency=session.get("currency", "usd"),
+            provider="stripe",
+            payment_intent_id=payment_intent_id,
+        )
+    else:
+        # Immediate capture — funds charged
+        emit_payment_captured(
+            invoice_id=UUID(invoice_id),
+            payment_reference=session["id"],
+            amount=str(session["amount_total"] / 100),
+            currency=session.get("currency", "usd"),
+            provider="stripe",
+            transaction_id=payment_intent_id,
+        )
 
 
 def _handle_invoice_paid(stripe_invoice):
