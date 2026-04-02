@@ -539,12 +539,28 @@ def session_status(session_id):
     if data.get("status") == "paid":
         _reconcile_payment(data)
 
+    # Include invoice_id from session metadata so frontend can redirect to confirmation
+    metadata = data.get("metadata", {})
+    invoice_id = metadata.get("invoice_id")
+
+    # Fallback: look up by provider_session_id
+    if not invoice_id:
+        invoice = None
+        stripe_sid = data.get("session_id", "")
+        if stripe_sid:
+            container = current_app.container
+            invoice_repo = container.invoice_repository()
+            invoice = invoice_repo.find_by_provider_session_id(stripe_sid)
+            if invoice:
+                invoice_id = str(invoice.id)
+
     return (
         jsonify(
             {
                 "status": data.get("status"),
                 "amount_total": data.get("amount_total"),
                 "currency": data.get("currency"),
+                "invoice_id": invoice_id,
             }
         ),
         200,
