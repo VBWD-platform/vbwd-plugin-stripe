@@ -38,6 +38,12 @@ class StripePlugin(PaymentProviderPlugin):
     def get_url_prefix(self) -> Optional[str]:
         return "/api/v1/plugins/stripe"
 
+    @property
+    def admin_permissions(self):
+        return [
+            {"key": "payments.configure", "label": "Payment provider settings", "group": "Payments"},
+        ]
+
     def on_enable(self) -> None:
         pass  # Stateless — config read per-request from config_store
 
