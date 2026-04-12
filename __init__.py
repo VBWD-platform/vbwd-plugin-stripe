@@ -41,7 +41,11 @@ class StripePlugin(PaymentProviderPlugin):
     @property
     def admin_permissions(self):
         return [
-            {"key": "payments.configure", "label": "Payment provider settings", "group": "Payments"},
+            {
+                "key": "payments.configure",
+                "label": "Payment provider settings",
+                "group": "Payments",
+            },
         ]
 
     def on_enable(self) -> None:
