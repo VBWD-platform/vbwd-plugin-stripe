@@ -23,8 +23,6 @@ from vbwd.events.payment_events import (
     PaymentCapturedEvent,
     PaymentRefundedEvent,
     RefundReversedEvent,
-    SubscriptionCancelledEvent,
-    PaymentFailedEvent,
 )
 from vbwd.handlers.payment_handler import PaymentCapturedHandler
 from vbwd.plugins.config_store import PluginConfigEntry
@@ -192,7 +190,19 @@ def mock_repos(ids):
 
 @pytest.fixture
 def container_with_real_dispatcher(mock_repos):
-    """DI container with REAL DomainEventDispatcher + PaymentCapturedHandler wired."""
+    """DI container with a REAL DomainEventDispatcher + PaymentCapturedHandler,
+    and the REAL line-item handlers registered in the line-item registry.
+
+    Line-item activation (subscription/add-on/token) is delegated to the
+    registry now, so the full pipeline only fires when those handlers are
+    registered (as they are at app startup). Saves + restores the singleton.
+    """
+    from vbwd.events.line_item_registry import line_item_registry
+    from vbwd.handlers.core_line_item_handler import CoreLineItemHandler
+    from plugins.subscription.subscription.handlers.line_item_handler import (
+        SubscriptionLineItemHandler,
+    )
+
     container = MagicMock()
 
     # Wire up mock repos
@@ -205,7 +215,15 @@ def container_with_real_dispatcher(mock_repos):
     dispatcher.register("payment.captured", handler)
 
     container.event_dispatcher.return_value = dispatcher
-    return container
+
+    saved_handlers = line_item_registry.handlers
+    line_item_registry.clear()
+    line_item_registry.register(CoreLineItemHandler(container))
+    line_item_registry.register(SubscriptionLineItemHandler(container))
+    yield container
+    line_item_registry.clear()
+    for existing in saved_handlers:
+        line_item_registry.register(existing)
 
 
 @pytest.fixture
@@ -601,19 +619,15 @@ class TestIdempotencyE2E:
 
 
 class TestStripeSubscriptionLinking:
-    """Verify provider_subscription_id is stored on our Subscription model."""
+    """The checkout webhook links the provider subscription via the port."""
 
     def test_stripe_sub_id_linked_on_checkout(
-        self, client, mock_stripe, mock_repos, ids
+        self, client, mock_stripe, mock_repos, ids, fake_lifecycle
     ):
-        """checkout.session.completed with subscription should link provider_subscription_id."""
-        sub = _make_subscription(ids["subscription"], ids["user"])
+        """checkout.session.completed with a subscription calls the link port."""
         li = _make_line_item(LineItemType.SUBSCRIPTION, ids["subscription"])
         invoice = _make_invoice(ids["invoice"], ids["user"], [li])
-
         mock_repos["invoice_repository"].find_by_id.return_value = invoice
-        mock_repos["subscription_repository"].find_by_id.return_value = sub
-        mock_repos["subscription_repository"].find_active_by_user.return_value = None
 
         checkout_obj = {
             "id": "cs_recurring",
@@ -629,8 +643,9 @@ class TestStripeSubscriptionLinking:
 
         _post_webhook(client, mock_stripe, "checkout.session.completed", checkout_obj)
 
-        # provider_subscription_id should be stored
-        assert sub.provider_subscription_id == "sub_stripe_123"
+        fake_lifecycle.link_provider_subscription.assert_called_once_with(
+            ids["invoice"], "sub_stripe_123"
+        )
 
 
 # ===========================================================================
@@ -639,34 +654,12 @@ class TestStripeSubscriptionLinking:
 
 
 class TestSubscriptionDeletedE2E:
-    """Verify customer.subscription.deleted emits SubscriptionCancelledEvent."""
+    """customer.subscription.deleted cancels via the lifecycle port."""
 
     def test_cancellation_event_emitted(
-        self, client, mock_stripe, mock_repos, container_with_real_dispatcher, ids
+        self, client, mock_stripe, mock_repos, ids, fake_lifecycle
     ):
-        """customer.subscription.deleted should emit SubscriptionCancelledEvent."""
-        sub = _make_subscription(
-            ids["subscription"], ids["user"], status=SubscriptionStatus.ACTIVE
-        )
-        sub.provider_subscription_id = "sub_stripe_del"
-        mock_repos[
-            "subscription_repository"
-        ].find_by_provider_subscription_id.return_value = sub
-
-        # Track emitted events
-        dispatcher = container_with_real_dispatcher.event_dispatcher.return_value
-        emitted = []
-        original_emit = dispatcher.emit
-
-        def tracking_emit(event):
-            emitted.append(event)
-            # SubscriptionCancelledEvent has no registered handler, so just return
-            if isinstance(event, PaymentCapturedEvent):
-                return original_emit(event)
-            return None
-
-        dispatcher.emit = tracking_emit
-
+        """customer.subscription.deleted should call the cancel port."""
         stripe_sub_obj = {"id": "sub_stripe_del"}
 
         resp = _post_webhook(
@@ -674,11 +667,11 @@ class TestSubscriptionDeletedE2E:
         )
         assert resp.status_code == 200
 
-        # Should have emitted SubscriptionCancelledEvent
-        assert len(emitted) == 1
-        assert isinstance(emitted[0], SubscriptionCancelledEvent)
-        assert emitted[0].subscription_id == ids["subscription"]
-        assert emitted[0].provider == "stripe"
+        fake_lifecycle.cancel_by_provider_subscription_id.assert_called_once_with(
+            provider="stripe",
+            provider_subscription_id="sub_stripe_del",
+            reason="stripe_subscription_deleted",
+        )
 
 
 # ===========================================================================
@@ -687,49 +680,28 @@ class TestSubscriptionDeletedE2E:
 
 
 class TestPaymentFailedE2E:
-    """Verify invoice.payment_failed emits PaymentFailedEvent."""
+    """invoice.payment_failed flags failure via the lifecycle port."""
 
     def test_payment_failed_event_emitted(
-        self, client, mock_stripe, mock_repos, container_with_real_dispatcher, ids
+        self, client, mock_stripe, mock_repos, ids, fake_lifecycle
     ):
-        """invoice.payment_failed should emit PaymentFailedEvent."""
-        sub = _make_subscription(
-            ids["subscription"], ids["user"], status=SubscriptionStatus.ACTIVE
-        )
-        mock_repos[
-            "subscription_repository"
-        ].find_by_provider_subscription_id.return_value = sub
-
-        dispatcher = container_with_real_dispatcher.event_dispatcher.return_value
-        emitted = []
-        original_emit = dispatcher.emit
-
-        def tracking_emit(event):
-            emitted.append(event)
-            if isinstance(event, PaymentCapturedEvent):
-                return original_emit(event)
-            return None
-
-        dispatcher.emit = tracking_emit
-
+        """invoice.payment_failed should call the mark-failed port."""
         stripe_invoice_obj = {
             "id": "in_fail_123",
             "subscription": "sub_stripe_fail",
             "last_payment_error": {"message": "Card declined"},
         }
-        mock_repos[
-            "subscription_repository"
-        ].find_by_provider_subscription_id.return_value = sub
 
         resp = _post_webhook(
             client, mock_stripe, "invoice.payment_failed", stripe_invoice_obj
         )
         assert resp.status_code == 200
 
-        assert len(emitted) == 1
-        assert isinstance(emitted[0], PaymentFailedEvent)
-        assert emitted[0].subscription_id == ids["subscription"]
-        assert emitted[0].error_message == "Card declined"
+        fake_lifecycle.mark_provider_payment_failed.assert_called_once_with(
+            provider="stripe",
+            provider_subscription_id="sub_stripe_fail",
+            error_message="Card declined",
+        )
 
 
 # ===========================================================================

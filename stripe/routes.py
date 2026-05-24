@@ -13,18 +13,13 @@ from vbwd.plugins.payment_route_helpers import (
     determine_session_mode,
 )
 from vbwd.sdk.interface import SDKConfig
-from vbwd.models.enums import LineItemType, InvoiceStatus
-from vbwd.models.invoice_line_item import InvoiceLineItem
-from vbwd.models.invoice import UserInvoice
-from vbwd.models.subscription import Subscription
-from vbwd.models.addon_subscription import AddOnSubscription
+from vbwd.models.enums import InvoiceStatus
 from vbwd.events.payment_events import (
-    SubscriptionCancelledEvent,
-    PaymentFailedEvent,
     PaymentRefundedEvent,
     RefundReversedEvent,
 )
-from vbwd.extensions import db
+from vbwd.events.line_item_registry import line_item_registry
+from vbwd.services.subscription_lifecycle import resolve_subscription_lifecycle
 
 logger = logging.getLogger(__name__)
 
@@ -54,43 +49,35 @@ def _get_adapter(config):
 
 
 def _build_stripe_subscription_items(invoice):
-    """Convert invoice recurring line items to Stripe subscription line_items."""
+    """Convert RECURRING invoice line items to Stripe subscription line_items.
+
+    Which line items are recurring (and their name/period) comes from the
+    extensible line-item registry — each plugin declares its own recurring
+    types. One-off items (token bundles, shop items, add-ons sold once, …)
+    return no spec and are charged once, not as a subscription. stripe imports
+    no subscription model.
+    """
     items = []
     currency = (invoice.currency or "EUR").lower()
 
     for li in invoice.line_items:
-        if li.item_type == LineItemType.SUBSCRIPTION:
-            sub = db.session.get(Subscription, li.item_id)
-            if sub and sub.tarif_plan and sub.tarif_plan.is_recurring:
-                period = sub.tarif_plan.billing_period.value
-                recurring = BILLING_PERIOD_TO_STRIPE.get(period, {"interval": "month"})
-                items.append(
-                    {
-                        "price_data": {
-                            "currency": currency,
-                            "unit_amount": int(li.unit_price * 100),
-                            "recurring": recurring,
-                            "product_data": {"name": sub.tarif_plan.name},
-                        },
-                        "quantity": 1,
-                    }
-                )
-        elif li.item_type == LineItemType.ADD_ON:
-            addon_sub = db.session.get(AddOnSubscription, li.item_id)
-            if addon_sub and addon_sub.addon and addon_sub.addon.is_recurring:
-                period = addon_sub.addon.billing_period
-                recurring = BILLING_PERIOD_TO_STRIPE.get(period, {"interval": "month"})
-                items.append(
-                    {
-                        "price_data": {
-                            "currency": currency,
-                            "unit_amount": int(li.unit_price * 100),
-                            "recurring": recurring,
-                            "product_data": {"name": addon_sub.addon.name},
-                        },
-                        "quantity": li.quantity,
-                    }
-                )
+        spec = line_item_registry.recurring_billing_spec(li)
+        if not spec:
+            continue
+        recurring = BILLING_PERIOD_TO_STRIPE.get(
+            spec.billing_period, {"interval": "month"}
+        )
+        items.append(
+            {
+                "price_data": {
+                    "currency": currency,
+                    "unit_amount": int(li.unit_price * 100),
+                    "recurring": recurring,
+                    "product_data": {"name": spec.name},
+                },
+                "quantity": li.quantity,
+            }
+        )
     return items
 
 
@@ -266,17 +253,20 @@ def _handle_invoice_paid(stripe_invoice):
     if not stripe_sub_id:
         return
 
-    container = current_app.container
-    sub_repo = container.subscription_repository()
-    subscription = sub_repo.find_by_provider_subscription_id(stripe_sub_id)
-    if not subscription:
+    # Renewal invoice creation is owned by the subscription plugin (via the
+    # lifecycle port); no subscription model import in stripe.
+    renewal_invoice_id = resolve_subscription_lifecycle().record_provider_renewal(
+        provider="stripe",
+        provider_subscription_id=stripe_sub_id,
+        amount=str(stripe_invoice["amount_paid"] / 100),
+        currency=stripe_invoice.get("currency", "usd"),
+        provider_reference=stripe_invoice["id"],
+    )
+    if not renewal_invoice_id:
         return
 
-    # Create renewal invoice in our system
-    renewal_invoice = _create_renewal_invoice(subscription, stripe_invoice)
-
     emit_payment_captured(
-        invoice_id=renewal_invoice.id,
+        invoice_id=renewal_invoice_id,
         payment_reference=stripe_invoice["id"],
         amount=str(stripe_invoice["amount_paid"] / 100),
         currency=stripe_invoice.get("currency", "usd"),
@@ -287,19 +277,11 @@ def _handle_invoice_paid(stripe_invoice):
 
 def _handle_subscription_deleted(stripe_sub):
     """Handle Stripe customer.subscription.deleted — cancel our subscription."""
-    container = current_app.container
-    sub_repo = container.subscription_repository()
-    subscription = sub_repo.find_by_provider_subscription_id(stripe_sub["id"])
-    if not subscription:
-        return
-
-    event = SubscriptionCancelledEvent(
-        subscription_id=subscription.id,
-        user_id=subscription.user_id,
-        reason="stripe_subscription_deleted",
+    resolve_subscription_lifecycle().cancel_by_provider_subscription_id(
         provider="stripe",
+        provider_subscription_id=stripe_sub["id"],
+        reason="stripe_subscription_deleted",
     )
-    container.event_dispatcher().emit(event)
 
 
 def _handle_payment_failed(stripe_invoice):
@@ -308,24 +290,16 @@ def _handle_payment_failed(stripe_invoice):
     if not stripe_sub_id:
         return
 
-    container = current_app.container
-    sub_repo = container.subscription_repository()
-    subscription = sub_repo.find_by_provider_subscription_id(stripe_sub_id)
-    if not subscription:
-        return
-
-    event = PaymentFailedEvent(
-        subscription_id=subscription.id,
-        user_id=subscription.user_id,
-        error_code="payment_failed",
-        error_message=stripe_invoice.get("last_payment_error", {}).get(
-            "message", "Payment failed"
-        )
+    error_message = (
+        stripe_invoice.get("last_payment_error", {}).get("message", "Payment failed")
         if isinstance(stripe_invoice.get("last_payment_error"), dict)
-        else "Payment failed",
-        provider="stripe",
+        else "Payment failed"
     )
-    container.event_dispatcher().emit(event)
+    resolve_subscription_lifecycle().mark_provider_payment_failed(
+        provider="stripe",
+        provider_subscription_id=stripe_sub_id,
+        error_message=error_message,
+    )
 
 
 def _handle_charge_refunded(charge, config):
@@ -458,61 +432,13 @@ def _handle_refund_updated(refund_obj, config):
 
 
 def _link_stripe_subscription(invoice_id, provider_subscription_id):
-    """Store provider_subscription_id on our Subscription after initial checkout."""
-    container = current_app.container
-    invoice_repo = container.invoice_repository()
-    sub_repo = container.subscription_repository()
+    """Store provider_subscription_id on our Subscription after initial checkout.
 
-    invoice = invoice_repo.find_by_id(invoice_id)
-    if not invoice:
-        return
-
-    for li in invoice.line_items:
-        if li.item_type == LineItemType.SUBSCRIPTION:
-            subscription = sub_repo.find_by_id(li.item_id)
-            if subscription:
-                subscription.provider_subscription_id = provider_subscription_id
-                sub_repo.save(subscription)
-                break
-
-
-def _create_renewal_invoice(subscription, stripe_invoice):
-    """Create a renewal invoice in our system from Stripe's auto-generated invoice."""
-    container = current_app.container
-    invoice_repo = container.invoice_repository()
-
-    # Deduplication: check if we already processed this Stripe invoice
-    existing = invoice_repo.find_by_provider_session_id(stripe_invoice["id"])
-    if existing:
-        return existing
-
-    plan = subscription.tarif_plan
-    amount = Decimal(str(stripe_invoice["amount_paid"] / 100))
-    renewal_invoice = UserInvoice(
-        user_id=subscription.user_id,
-        tarif_plan_id=plan.id if plan else None,
-        subscription_id=subscription.id,
-        invoice_number=UserInvoice.generate_invoice_number(),
-        amount=amount,
-        total_amount=amount,
-        currency=(stripe_invoice.get("currency", "eur")).upper(),
-        status=InvoiceStatus.PENDING,
-        payment_method="stripe",
-        provider_session_id=stripe_invoice["id"],
+    Delegated to the subscription-lifecycle port (no subscription model import).
+    """
+    resolve_subscription_lifecycle().link_provider_subscription(
+        invoice_id, provider_subscription_id
     )
-    # Add subscription line item
-    renewal_invoice.line_items.append(
-        InvoiceLineItem(
-            item_type=LineItemType.SUBSCRIPTION,
-            item_id=subscription.id,
-            description=f"Renewal: {plan.name}" if plan else "Subscription renewal",
-            quantity=1,
-            unit_price=amount,
-            total_price=amount,
-        )
-    )
-    invoice_repo.save(renewal_invoice)
-    return renewal_invoice
 
 
 @stripe_plugin_bp.route("/session-status/<session_id>", methods=["GET"])

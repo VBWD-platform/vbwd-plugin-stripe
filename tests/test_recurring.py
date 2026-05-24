@@ -19,10 +19,7 @@ from vbwd.models.enums import (
     LineItemType,
     BillingPeriod,
 )
-from vbwd.events.payment_events import (
-    SubscriptionCancelledEvent,
-    PaymentFailedEvent,
-)
+from vbwd.events.line_item_registry import RecurringBillingSpec
 
 
 @pytest.fixture
@@ -127,48 +124,44 @@ def _make_invoice(user_id, line_items, total_amount=Decimal("9.99"), currency="E
 def _make_subscription_line_item(
     billing_period, plan_name="Pro Plan", unit_price=Decimal("9.99")
 ):
-    """Create a mock subscription line item with a recurring plan."""
+    """Mock subscription line item the line-item registry reports as recurring.
+
+    The ``recurring_registry`` fixture's fake handler reads ``_recurring_spec``.
+    """
     li = MagicMock()
     li.item_type = LineItemType.SUBSCRIPTION
     li.item_id = uuid4()
     li.unit_price = unit_price
     li.quantity = 1
-
-    sub = MagicMock()
-    sub.tarif_plan = MagicMock()
-    sub.tarif_plan.is_recurring = True
-    sub.tarif_plan.billing_period = billing_period
-    sub.tarif_plan.name = plan_name
-    li._sub = sub  # For setup in db.session.get mock
+    li._recurring_spec = RecurringBillingSpec(
+        name=plan_name, billing_period=billing_period.value
+    )
     return li
 
 
 def _make_addon_line_item(
     billing_period_str, addon_name="Extra Storage", unit_price=Decimal("4.99")
 ):
-    """Create a mock add-on line item with a recurring add-on."""
+    """Mock recurring add-on line item (registry reports it recurring)."""
     li = MagicMock()
     li.item_type = LineItemType.ADD_ON
     li.item_id = uuid4()
     li.unit_price = unit_price
     li.quantity = 2
-
-    addon_sub = MagicMock()
-    addon_sub.addon = MagicMock()
-    addon_sub.addon.is_recurring = True
-    addon_sub.addon.billing_period = billing_period_str
-    addon_sub.addon.name = addon_name
-    li._addon_sub = addon_sub
+    li._recurring_spec = RecurringBillingSpec(
+        name=addon_name, billing_period=billing_period_str
+    )
     return li
 
 
 def _make_one_time_line_item():
-    """Create a mock token bundle line item (one-time)."""
+    """Mock token bundle line item (one-time — no recurring spec)."""
     li = MagicMock()
     li.item_type = LineItemType.TOKEN_BUNDLE
     li.item_id = uuid4()
     li.unit_price = Decimal("19.99")
     li.quantity = 1
+    li._recurring_spec = None
     return li
 
 
@@ -176,126 +169,85 @@ def _make_one_time_line_item():
 
 
 class TestDetermineSessionMode:
-    """Tests for _determine_session_mode logic."""
+    """Mode determination delegates recurrence to the line-item registry."""
 
-    def test_determine_mode_recurring_plan(self, app, mocker):
+    def test_determine_mode_recurring_plan(self, recurring_registry):
         """Should return 'subscription' for monthly recurring plan."""
         from vbwd.plugins.payment_route_helpers import determine_session_mode
 
-        sub_li = _make_subscription_line_item(BillingPeriod.MONTHLY)
-
         invoice = MagicMock()
-        invoice.line_items = [sub_li]
+        invoice.line_items = [_make_subscription_line_item(BillingPeriod.MONTHLY)]
 
-        mock_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
-        mock_db.session.get.return_value = sub_li._sub
+        assert determine_session_mode(invoice) == "subscription"
 
-        with app.app_context():
-            mode = determine_session_mode(invoice)
-        assert mode == "subscription"
-
-    def test_determine_mode_one_time_plan(self, app, mocker):
+    def test_determine_mode_one_time_plan(self, recurring_registry):
         """Should return 'payment' for one-time (token bundle) items."""
         from vbwd.plugins.payment_route_helpers import determine_session_mode
 
-        li = _make_one_time_line_item()
         invoice = MagicMock()
-        invoice.line_items = [li]
+        invoice.line_items = [_make_one_time_line_item()]
 
-        mock_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
-        mock_db.session.get.return_value = None
+        assert determine_session_mode(invoice) == "payment"
 
-        with app.app_context():
-            mode = determine_session_mode(invoice)
-        assert mode == "payment"
-
-    def test_determine_mode_recurring_addon(self, app, mocker):
+    def test_determine_mode_recurring_addon(self, recurring_registry):
         """Should return 'subscription' for recurring add-on."""
         from vbwd.plugins.payment_route_helpers import determine_session_mode
 
-        addon_li = _make_addon_line_item("monthly")
         invoice = MagicMock()
-        invoice.line_items = [addon_li]
+        invoice.line_items = [_make_addon_line_item("monthly")]
 
-        mock_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
-        mock_db.session.get.return_value = addon_li._addon_sub
+        assert determine_session_mode(invoice) == "subscription"
 
-        with app.app_context():
-            mode = determine_session_mode(invoice)
-        assert mode == "subscription"
-
-    def test_determine_mode_mixed_one_time(self, app, mocker):
+    def test_determine_mode_mixed_one_time(self, recurring_registry):
         """Should return 'payment' when all items are one-time tokens."""
         from vbwd.plugins.payment_route_helpers import determine_session_mode
 
-        li1 = _make_one_time_line_item()
-        li2 = _make_one_time_line_item()
         invoice = MagicMock()
-        invoice.line_items = [li1, li2]
+        invoice.line_items = [_make_one_time_line_item(), _make_one_time_line_item()]
 
-        mock_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
-        mock_db.session.get.return_value = None
-
-        with app.app_context():
-            mode = determine_session_mode(invoice)
-        assert mode == "payment"
+        assert determine_session_mode(invoice) == "payment"
 
 
 # ---- Subscription line item building tests ----
 
 
 class TestBuildSubscriptionItems:
-    """Tests for _build_stripe_subscription_items."""
+    """_build_stripe_subscription_items reads the registry's billing spec."""
 
-    def test_build_subscription_items_monthly(self, app, mocker):
+    def test_build_subscription_items_monthly(self, recurring_registry):
         """Monthly plan should produce interval='month'."""
         from plugins.stripe.stripe.routes import _build_stripe_subscription_items
 
-        li = _make_subscription_line_item(BillingPeriod.MONTHLY)
         invoice = MagicMock()
-        invoice.line_items = [li]
+        invoice.line_items = [_make_subscription_line_item(BillingPeriod.MONTHLY)]
         invoice.currency = "EUR"
 
-        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
-        mock_db.session.get.return_value = li._sub
-
-        with app.app_context():
-            items = _build_stripe_subscription_items(invoice)
+        items = _build_stripe_subscription_items(invoice)
 
         assert len(items) == 1
         assert items[0]["price_data"]["recurring"]["interval"] == "month"
 
-    def test_build_subscription_items_yearly(self, app, mocker):
+    def test_build_subscription_items_yearly(self, recurring_registry):
         """Yearly plan should produce interval='year'."""
         from plugins.stripe.stripe.routes import _build_stripe_subscription_items
 
-        li = _make_subscription_line_item(BillingPeriod.YEARLY)
         invoice = MagicMock()
-        invoice.line_items = [li]
+        invoice.line_items = [_make_subscription_line_item(BillingPeriod.YEARLY)]
         invoice.currency = "EUR"
 
-        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
-        mock_db.session.get.return_value = li._sub
-
-        with app.app_context():
-            items = _build_stripe_subscription_items(invoice)
+        items = _build_stripe_subscription_items(invoice)
 
         assert items[0]["price_data"]["recurring"]["interval"] in ("year",)
 
-    def test_build_subscription_items_quarterly(self, app, mocker):
+    def test_build_subscription_items_quarterly(self, recurring_registry):
         """Quarterly plan should produce interval_count=3 with interval='month'."""
         from plugins.stripe.stripe.routes import _build_stripe_subscription_items
 
-        li = _make_subscription_line_item(BillingPeriod.QUARTERLY)
         invoice = MagicMock()
-        invoice.line_items = [li]
+        invoice.line_items = [_make_subscription_line_item(BillingPeriod.QUARTERLY)]
         invoice.currency = "USD"
 
-        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
-        mock_db.session.get.return_value = li._sub
-
-        with app.app_context():
-            items = _build_stripe_subscription_items(invoice)
+        items = _build_stripe_subscription_items(invoice)
 
         recurring = items[0]["price_data"]["recurring"]
         assert recurring["interval"] == "month"
@@ -309,7 +261,7 @@ class TestCreateSessionSubscriptionMode:
     """Test create-session uses mode=subscription for recurring invoices."""
 
     def test_create_session_subscription_mode(
-        self, client, auth_headers, mock_container, mock_stripe, mocker
+        self, client, auth_headers, mock_container, mock_stripe, recurring_registry
     ):
         """create-session should call create_subscription_session for recurring invoice."""
         user_id = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
@@ -317,13 +269,6 @@ class TestCreateSessionSubscriptionMode:
         invoice = _make_invoice(user_id, [li])
 
         mock_container.invoice_repository.return_value.find_by_id.return_value = invoice
-
-        # Mock db in both modules (routes uses it for _build_stripe_subscription_items,
-        # payment_route_helpers uses it for determine_session_mode)
-        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
-        mock_db.session.get.return_value = li._sub
-        mock_helpers_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
-        mock_helpers_db.session.get.return_value = li._sub
 
         # Mock user with existing payment_customer_id
         user = MagicMock()
@@ -352,7 +297,7 @@ class TestCreateSessionSubscriptionMode:
         )
 
     def test_create_session_reuses_customer(
-        self, client, auth_headers, mock_container, mock_stripe, mocker
+        self, client, auth_headers, mock_container, mock_stripe, recurring_registry
     ):
         """Should reuse existing payment_customer_id without creating a new customer."""
         user_id = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
@@ -360,11 +305,6 @@ class TestCreateSessionSubscriptionMode:
         invoice = _make_invoice(user_id, [li])
 
         mock_container.invoice_repository.return_value.find_by_id.return_value = invoice
-
-        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
-        mock_db.session.get.return_value = li._sub
-        mock_helpers_db = mocker.patch("vbwd.plugins.payment_route_helpers.db")
-        mock_helpers_db.session.get.return_value = li._sub
 
         user = MagicMock()
         user.email = "test@example.com"
@@ -412,26 +352,10 @@ class TestWebhookRecurring:
         )
 
     def test_webhook_checkout_stores_subscription_id(
-        self, client, mock_stripe, mock_container
+        self, client, mock_stripe, mock_container, fake_lifecycle
     ):
-        """checkout.session.completed with subscription should store provider_subscription_id."""
+        """checkout.session.completed with a subscription links it via the port."""
         invoice_id = uuid4()
-        sub_id = uuid4()
-        li = MagicMock()
-        li.item_type = LineItemType.SUBSCRIPTION
-        li.item_id = sub_id
-
-        invoice = MagicMock()
-        invoice.id = invoice_id
-        invoice.line_items = [li]
-
-        sub_mock = MagicMock()
-        sub_mock.provider_subscription_id = None
-
-        mock_container.invoice_repository.return_value.find_by_id.return_value = invoice
-        mock_container.subscription_repository.return_value.find_by_id.return_value = (
-            sub_mock
-        )
 
         self._post_webhook(
             client,
@@ -447,41 +371,16 @@ class TestWebhookRecurring:
             },
         )
 
-        assert sub_mock.provider_subscription_id == "sub_stripe_123"
-        mock_container.subscription_repository.return_value.save.assert_called_with(
-            sub_mock
+        fake_lifecycle.link_provider_subscription.assert_called_once_with(
+            invoice_id, "sub_stripe_123"
         )
 
     def test_webhook_invoice_paid_creates_renewal(
-        self, client, mock_stripe, mock_container, mocker
+        self, client, mock_stripe, mock_container, fake_lifecycle
     ):
-        """invoice.paid (renewal) should create renewal invoice and emit event."""
-        subscription = MagicMock()
-        subscription.id = uuid4()
-        subscription.user_id = uuid4()
-        subscription.tarif_plan = MagicMock()
-        subscription.tarif_plan.id = uuid4()
-        subscription.tarif_plan.name = "Pro"
-
-        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = (
-            subscription
-        )
-        mock_container.invoice_repository.return_value.find_by_provider_session_id.return_value = (
-            None
-        )
-
-        # Mock UserInvoice class and its generate_invoice_number
-        mock_invoice_cls = mocker.patch(
-            "plugins.stripe.stripe.routes.UserInvoice", autospec=False
-        )
-        mock_invoice_instance = MagicMock()
-        mock_invoice_instance.id = uuid4()
-        mock_invoice_instance.line_items = []
-        mock_invoice_cls.return_value = mock_invoice_instance
-        mock_invoice_cls.generate_invoice_number.return_value = "INV-001"
-
-        # Mock InvoiceLineItem
-        mocker.patch("plugins.stripe.stripe.routes.InvoiceLineItem", MagicMock)
+        """invoice.paid (renewal) records the renewal via the port and emits."""
+        renewal_invoice_id = uuid4()
+        fake_lifecycle.record_provider_renewal.return_value = renewal_invoice_id
 
         self._post_webhook(
             client,
@@ -497,11 +396,19 @@ class TestWebhookRecurring:
             },
         )
 
-        mock_container.invoice_repository.return_value.save.assert_called()
-        mock_container.event_dispatcher.return_value.emit.assert_called_once()
+        fake_lifecycle.record_provider_renewal.assert_called_once_with(
+            provider="stripe",
+            provider_subscription_id="sub_stripe_123",
+            amount="9.99",
+            currency="eur",
+            provider_reference="in_stripe_renewal",
+        )
+        dispatcher = mock_container.event_dispatcher.return_value
+        dispatcher.emit.assert_called_once()
+        assert dispatcher.emit.call_args[0][0].invoice_id == renewal_invoice_id
 
     def test_webhook_invoice_paid_skips_first(
-        self, client, mock_stripe, mock_container
+        self, client, mock_stripe, mock_container, fake_lifecycle
     ):
         """invoice.paid with billing_reason=subscription_create should be skipped."""
         self._post_webhook(
@@ -518,26 +425,15 @@ class TestWebhookRecurring:
             },
         )
 
+        fake_lifecycle.record_provider_renewal.assert_not_called()
         mock_container.event_dispatcher.return_value.emit.assert_not_called()
 
-    def test_webhook_invoice_paid_deduplication(
-        self, client, mock_stripe, mock_container
+    def test_webhook_invoice_paid_no_renewal_no_emit(
+        self, client, mock_stripe, mock_container, fake_lifecycle
     ):
-        """Same stripe_invoice_id should not create a duplicate renewal invoice."""
-        subscription = MagicMock()
-        subscription.id = uuid4()
-        subscription.user_id = uuid4()
-        subscription.tarif_plan = MagicMock()
-
-        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = (
-            subscription
-        )
-
-        existing_invoice = MagicMock()
-        existing_invoice.id = uuid4()
-        mock_container.invoice_repository.return_value.find_by_provider_session_id.return_value = (
-            existing_invoice
-        )
+        """When the port returns no renewal id (no match / already processed),
+        the webhook emits nothing — dedup is the port's concern."""
+        fake_lifecycle.record_provider_renewal.return_value = None
 
         self._post_webhook(
             client,
@@ -553,22 +449,13 @@ class TestWebhookRecurring:
             },
         )
 
-        # Emit should still be called (for the existing invoice)
-        mock_container.event_dispatcher.return_value.emit.assert_called_once()
-        # But save should NOT create a new invoice (uses existing)
-        # The existing invoice is returned, so no new UserInvoice is created
+        fake_lifecycle.record_provider_renewal.assert_called_once()
+        mock_container.event_dispatcher.return_value.emit.assert_not_called()
 
     def test_webhook_subscription_deleted_cancels(
-        self, client, mock_stripe, mock_container
+        self, client, mock_stripe, mock_container, fake_lifecycle
     ):
-        """customer.subscription.deleted should emit SubscriptionCancelledEvent."""
-        subscription = MagicMock()
-        subscription.id = uuid4()
-        subscription.user_id = uuid4()
-        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = (
-            subscription
-        )
-
+        """customer.subscription.deleted cancels via the lifecycle port."""
         self._post_webhook(
             client,
             mock_stripe,
@@ -576,25 +463,16 @@ class TestWebhookRecurring:
             {"id": "sub_deleted_123"},
         )
 
-        dispatcher = mock_container.event_dispatcher.return_value
-        dispatcher.emit.assert_called_once()
-        event = dispatcher.emit.call_args[0][0]
-        assert isinstance(event, SubscriptionCancelledEvent)
-        assert event.subscription_id == subscription.id
-        assert event.provider == "stripe"
-        assert event.reason == "stripe_subscription_deleted"
-
-    def test_webhook_payment_failed_emits_event(
-        self, client, mock_stripe, mock_container
-    ):
-        """invoice.payment_failed should emit PaymentFailedEvent."""
-        subscription = MagicMock()
-        subscription.id = uuid4()
-        subscription.user_id = uuid4()
-        mock_container.subscription_repository.return_value.find_by_provider_subscription_id.return_value = (
-            subscription
+        fake_lifecycle.cancel_by_provider_subscription_id.assert_called_once_with(
+            provider="stripe",
+            provider_subscription_id="sub_deleted_123",
+            reason="stripe_subscription_deleted",
         )
 
+    def test_webhook_payment_failed_emits_event(
+        self, client, mock_stripe, mock_container, fake_lifecycle
+    ):
+        """invoice.payment_failed flags failure via the lifecycle port."""
         self._post_webhook(
             client,
             mock_stripe,
@@ -607,14 +485,11 @@ class TestWebhookRecurring:
             },
         )
 
-        dispatcher = mock_container.event_dispatcher.return_value
-        dispatcher.emit.assert_called_once()
-        event = dispatcher.emit.call_args[0][0]
-        assert isinstance(event, PaymentFailedEvent)
-        assert event.subscription_id == subscription.id
-        assert event.error_code == "payment_failed"
-        assert event.error_message == "Card was declined"
-        assert event.provider == "stripe"
+        fake_lifecycle.mark_provider_payment_failed.assert_called_once_with(
+            provider="stripe",
+            provider_subscription_id="sub_123",
+            error_message="Card was declined",
+        )
 
 
 class TestBillingPeriodToStripeDaily:
@@ -626,20 +501,15 @@ class TestBillingPeriodToStripeDaily:
         assert "DAILY" in BILLING_PERIOD_TO_STRIPE
         assert BILLING_PERIOD_TO_STRIPE["DAILY"]["interval"] == "day"
 
-    def test_build_subscription_items_daily(self, app, mocker):
+    def test_build_subscription_items_daily(self, recurring_registry):
         from plugins.stripe.stripe.routes import _build_stripe_subscription_items
         from vbwd.models.enums import BillingPeriod
 
-        li = _make_subscription_line_item(BillingPeriod.DAILY)
         invoice = MagicMock()
-        invoice.line_items = [li]
+        invoice.line_items = [_make_subscription_line_item(BillingPeriod.DAILY)]
         invoice.currency = "EUR"
 
-        mock_db = mocker.patch("plugins.stripe.stripe.routes.db")
-        mock_db.session.get.return_value = li._sub
-
-        with app.app_context():
-            items = _build_stripe_subscription_items(invoice)
+        items = _build_stripe_subscription_items(invoice)
 
         assert len(items) == 1
         assert items[0]["price_data"]["recurring"]["interval"] == "day"
