@@ -97,16 +97,26 @@ def create_session():
     adapter = _get_adapter(config)
     mode = determine_session_mode(invoice)
     base_meta = {"invoice_id": str(invoice.id), "user_id": str(g.user_id)}
-    # Use Origin/Referer header to get the frontend URL (handles proxied ports correctly)
-    frontend_base = (
-        request.headers.get("Origin")
-        or request.headers.get("Referer", "").rstrip("/").rsplit("/pay", 1)[0]
-        or request.host_url.rstrip("/")
-    )
-    success_url = (
-        f"{frontend_base}/pay/stripe/success?session_id={{CHECKOUT_SESSION_ID}}"
-    )
-    cancel_url = f"{frontend_base}/pay/stripe/cancel"
+    # Native mobile/desktop apps send X-Client-Platform and use a custom URL
+    # scheme so ASWebAuthenticationSession can intercept the redirect and
+    # auto-dismiss the browser.  Web frontends fall through to the existing
+    # Origin-based redirect URLs.
+    client_platform = request.headers.get("X-Client-Platform", "").lower()
+
+    if client_platform in ("ios", "macos"):
+        success_url = "vbwd://stripe-callback/success?session_id={CHECKOUT_SESSION_ID}"
+        cancel_url = "vbwd://stripe-callback/cancel"
+    else:
+        # Use Origin/Referer header to get the frontend URL (handles proxied ports correctly)
+        frontend_base = (
+            request.headers.get("Origin")
+            or request.headers.get("Referer", "").rstrip("/").rsplit("/pay", 1)[0]
+            or request.host_url.rstrip("/")
+        )
+        success_url = (
+            f"{frontend_base}/pay/stripe/success?session_id={{CHECKOUT_SESSION_ID}}"
+        )
+        cancel_url = f"{frontend_base}/pay/stripe/cancel"
 
     if mode == "subscription":
         # Recurring: get/create Stripe Customer, create subscription session
