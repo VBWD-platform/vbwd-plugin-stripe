@@ -242,14 +242,25 @@ def _handle_checkout_completed(session):
             payment_intent_id=payment_intent_id,
         )
     else:
-        # Immediate capture — funds charged
+        # Immediate capture — funds charged. Store authorised+captured amounts
+        # for the fe-admin "Payment Information" block (refunded_amount is
+        # written by the refund handler when applicable).
+        captured_amount_str = f"{session['amount_total'] / 100:.2f}"
         emit_payment_captured(
             invoice_id=UUID(invoice_id),
             payment_reference=session["id"],
-            amount=str(session["amount_total"] / 100),
+            amount=captured_amount_str,
             currency=session.get("currency", "usd"),
             provider="stripe",
             transaction_id=payment_intent_id,
+            metadata={
+                "stripe": {
+                    "session_id": session["id"],
+                    "payment_intent_id": payment_intent_id,
+                    "authorised_amount": captured_amount_str,
+                    "captured_amount": captured_amount_str,
+                }
+            },
         )
 
 
@@ -275,13 +286,23 @@ def _handle_invoice_paid(stripe_invoice):
     if not renewal_invoice_id:
         return
 
+    captured_amount_str = f"{stripe_invoice['amount_paid'] / 100:.2f}"
     emit_payment_captured(
         invoice_id=renewal_invoice_id,
         payment_reference=stripe_invoice["id"],
-        amount=str(stripe_invoice["amount_paid"] / 100),
+        amount=captured_amount_str,
         currency=stripe_invoice.get("currency", "usd"),
         provider="stripe",
         transaction_id=stripe_invoice.get("payment_intent", ""),
+        metadata={
+            "stripe": {
+                "invoice_id": stripe_invoice["id"],
+                "payment_intent_id": stripe_invoice.get("payment_intent", ""),
+                "billing_reason": stripe_invoice.get("billing_reason", "renewal"),
+                "authorised_amount": captured_amount_str,
+                "captured_amount": captured_amount_str,
+            }
+        },
     )
 
 
@@ -541,11 +562,21 @@ def _reconcile_payment(session_data):
     if stripe_sub_id:
         _link_stripe_subscription(invoice_id, stripe_sub_id)
 
+    captured_amount_str = f"{(session_data.get('amount_total') or 0) / 100:.2f}"
     emit_payment_captured(
         invoice_id=invoice_id,
         payment_reference=session_data.get("session_id", ""),
-        amount=str((session_data.get("amount_total") or 0) / 100),
+        amount=captured_amount_str,
         currency=session_data.get("currency", "usd"),
         provider="stripe",
         transaction_id=session_data.get("payment_intent", ""),
+        metadata={
+            "stripe": {
+                "session_id": session_data.get("session_id", ""),
+                "payment_intent_id": session_data.get("payment_intent", ""),
+                "reconciled": True,
+                "authorised_amount": captured_amount_str,
+                "captured_amount": captured_amount_str,
+            }
+        },
     )
