@@ -402,9 +402,7 @@ def _resolve_payment_intent_from_refund(refund_obj, api_key) -> str | None:
     try:
         charge = stripe.Charge.retrieve(charge_id)
     except Exception:
-        logger.exception(
-            "Failed to retrieve charge %s for refund reversal", charge_id
-        )
+        logger.exception("Failed to retrieve charge %s for refund reversal", charge_id)
         return None
     return (
         charge.get("payment_intent")
