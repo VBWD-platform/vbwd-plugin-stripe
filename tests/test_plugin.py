@@ -44,9 +44,11 @@ class TestStripePluginMetadata:
         """get_url_prefix should return '/api/v1/plugins/stripe'."""
         assert plugin.get_url_prefix() == "/api/v1/plugins/stripe"
 
-    def test_no_dependencies(self, plugin):
-        """Plugin should declare no dependencies."""
-        assert plugin.metadata.dependencies == []
+    def test_declares_subscription_dependency(self, plugin):
+        """S07 — Stripe routes call resolve_subscription_lifecycle in the
+        recurring-billing path, so the plugin MUST declare the dep so
+        PluginManager refuses to enable Stripe when subscription is off."""
+        assert "subscription" in plugin.metadata.dependencies
 
     def test_on_enable_no_error(self, plugin):
         """on_enable should not raise any exception."""

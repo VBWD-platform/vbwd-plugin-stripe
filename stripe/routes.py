@@ -7,10 +7,11 @@ from flask import Blueprint, jsonify, request, current_app, g
 
 from vbwd.middleware.auth import require_auth
 from vbwd.plugins.payment_route_helpers import (
+    build_provider_redirect_urls,
     check_plugin_enabled,
-    validate_invoice_for_payment,
-    emit_payment_captured,
     determine_session_mode,
+    emit_payment_captured,
+    validate_invoice_for_payment,
 )
 from vbwd.sdk.interface import SDKConfig
 from vbwd.models.enums import InvoiceStatus
@@ -20,6 +21,8 @@ from vbwd.events.payment_events import (
 )
 from vbwd.events.line_item_registry import line_item_registry
 from vbwd.services.subscription_lifecycle import resolve_subscription_lifecycle
+
+from plugins.stripe.stripe.constants import STRIPE_CURRENCY_MULTIPLIER
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +74,7 @@ def _build_stripe_subscription_items(invoice):
             {
                 "price_data": {
                     "currency": currency,
-                    "unit_amount": int(li.unit_price * 100),
+                    "unit_amount": int(li.unit_price * STRIPE_CURRENCY_MULTIPLIER),
                     "recurring": recurring,
                     "product_data": {"name": spec.name},
                 },
@@ -97,26 +100,14 @@ def create_session():
     adapter = _get_adapter(config)
     mode = determine_session_mode(invoice)
     base_meta = {"invoice_id": str(invoice.id), "user_id": str(g.user_id)}
-    # Native mobile/desktop apps send X-Client-Platform and use a custom URL
-    # scheme so ASWebAuthenticationSession can intercept the redirect and
-    # auto-dismiss the browser.  Web frontends fall through to the existing
-    # Origin-based redirect URLs.
-    client_platform = request.headers.get("X-Client-Platform", "").lower()
-
-    if client_platform in ("ios", "macos"):
-        success_url = "vbwd://stripe-callback/success?session_id={CHECKOUT_SESSION_ID}"
-        cancel_url = "vbwd://stripe-callback/cancel"
-    else:
-        # Use Origin/Referer header to get the frontend URL (handles proxied ports correctly)
-        frontend_base = (
-            request.headers.get("Origin")
-            or request.headers.get("Referer", "").rstrip("/").rsplit("/pay", 1)[0]
-            or request.host_url.rstrip("/")
-        )
-        success_url = (
-            f"{frontend_base}/pay/stripe/success?session_id={{CHECKOUT_SESSION_ID}}"
-        )
-        cancel_url = f"{frontend_base}/pay/stripe/cancel"
+    # S21 — shared helper. Native iOS/macOS apps get a deep link they can
+    # intercept via ASWebAuthenticationSession; web falls back to Origin.
+    success_url, cancel_url = build_provider_redirect_urls(
+        request,
+        "stripe",
+        success_query="?session_id={CHECKOUT_SESSION_ID}",
+        ios_deep_link=True,
+    )
 
     if mode == "subscription":
         # Recurring: get/create Stripe Customer, create subscription session
@@ -385,42 +376,45 @@ def _handle_charge_refunded(charge, config):
     )
 
 
-def _handle_refund_updated(refund_obj, config):
-    """Handle Stripe refund.updated — if refund was canceled, restore the invoice.
-
-    Traces refund → charge → payment_intent → checkout session → invoice_id.
-    Only acts when refund status becomes 'canceled'.
-    """
-    if refund_obj.get("status") != "canceled":
-        return
-
-    # Get the charge/payment_intent from the refund
+def _resolve_stripe_api_key(config) -> str:
+    """Pick the right Stripe API key from plugin config (sandbox vs live)."""
     prefix = "test_" if config.get("sandbox", True) else "live_"
-    api_key = config.get(f"{prefix}secret_key") or config.get("secret_key", "")
+    return config.get(f"{prefix}secret_key") or config.get("secret_key", "")
+
+
+def _resolve_payment_intent_from_refund(refund_obj, api_key) -> str | None:
+    """Return the payment_intent_id this refund belongs to, or None.
+
+    Most refunds carry ``payment_intent`` directly. Older shapes require
+    a charge lookup; we tolerate either.
+    """
     payment_intent_id = refund_obj.get("payment_intent")
-    if not payment_intent_id:
-        # Try via charge
-        charge_id = refund_obj.get("charge")
-        if not charge_id:
-            return
-        import stripe
+    if payment_intent_id:
+        return payment_intent_id
 
-        stripe.api_key = api_key
-        try:
-            charge = stripe.Charge.retrieve(charge_id)
-            payment_intent_id = (
-                charge.get("payment_intent")
-                if isinstance(charge, dict)
-                else getattr(charge, "payment_intent", None)
-            )
-        except Exception:
-            logger.exception(
-                "Failed to retrieve charge %s for refund reversal", charge_id
-            )
-            return
-        if not payment_intent_id:
-            return
+    charge_id = refund_obj.get("charge")
+    if not charge_id:
+        return None
 
+    import stripe
+
+    stripe.api_key = api_key
+    try:
+        charge = stripe.Charge.retrieve(charge_id)
+    except Exception:
+        logger.exception(
+            "Failed to retrieve charge %s for refund reversal", charge_id
+        )
+        return None
+    return (
+        charge.get("payment_intent")
+        if isinstance(charge, dict)
+        else getattr(charge, "payment_intent", None)
+    )
+
+
+def _find_invoice_id_for_payment_intent(payment_intent_id, api_key) -> UUID | None:
+    """Look up our invoice_id from the Stripe checkout Session, or None."""
     import stripe
 
     stripe.api_key = api_key
@@ -432,29 +426,47 @@ def _handle_refund_updated(refund_obj, config):
         logger.exception(
             "Failed to look up session for refund reversal PI=%s", payment_intent_id
         )
-        return
+        return None
 
     if not sessions.data:
-        return
+        return None
 
-    session = sessions.data[0]
-    metadata = dict(session.metadata or {})
+    metadata = dict(sessions.data[0].metadata or {})
     invoice_id_str = metadata.get("invoice_id")
     if not invoice_id_str:
-        return
-
+        return None
     try:
-        invoice_id = UUID(invoice_id_str)
+        return UUID(invoice_id_str)
     except (ValueError, TypeError):
+        return None
+
+
+def _handle_refund_updated(refund_obj, config):
+    """Handle Stripe refund.updated — restore the invoice when canceled.
+
+    S23 — broke the trace (refund → payment_intent → session → invoice_id)
+    into two private helpers; this orchestration is now ~20 LOC.
+    """
+    if refund_obj.get("status") != "canceled":
         return
 
-    event = RefundReversedEvent(
-        invoice_id=invoice_id,
-        reason="stripe_refund_canceled",
-        provider="stripe",
+    api_key = _resolve_stripe_api_key(config)
+
+    payment_intent_id = _resolve_payment_intent_from_refund(refund_obj, api_key)
+    if not payment_intent_id:
+        return
+
+    invoice_id = _find_invoice_id_for_payment_intent(payment_intent_id, api_key)
+    if not invoice_id:
+        return
+
+    current_app.container.event_dispatcher().emit(
+        RefundReversedEvent(
+            invoice_id=invoice_id,
+            reason="stripe_refund_canceled",
+            provider="stripe",
+        )
     )
-    container = current_app.container
-    container.event_dispatcher().emit(event)
     logger.info(
         "Refund reversal processed for invoice %s, refund %s",
         invoice_id,
