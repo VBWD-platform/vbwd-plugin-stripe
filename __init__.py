@@ -27,10 +27,12 @@ class StripePlugin(PaymentProviderPlugin):
             version="1.0.0",
             author="VBWD Team",
             description="Stripe payment provider — Checkout Sessions with webhooks",
-            # S07 — calls resolve_subscription_lifecycle in webhook handlers
-            # (recurring billing). PluginManager refuses to enable us when
-            # subscription is disabled rather than 500-ing at webhook time.
-            dependencies=["subscription"],
+            # S50.4 — recurring billing is event-driven: webhooks publish
+            # domain-neutral facts (payment.recurring_charge / provider_linked /
+            # provider_cancelled / recurring_failed) to the bus. No subscriber
+            # (subscription disabled) ⇒ the published fact is a no-op, so stripe
+            # stays subscription-free and declares no subscription dependency.
+            dependencies=[],
         )
 
     def get_blueprint(self) -> Optional["Blueprint"]:

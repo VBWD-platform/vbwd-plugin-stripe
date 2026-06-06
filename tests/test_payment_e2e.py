@@ -66,6 +66,19 @@ def _make_invoice(invoice_id, user_id, line_items=None, status="PENDING"):
     inv.amount = Decimal("29.99")
     inv.currency = "EUR"
     inv.line_items = line_items or []
+
+    # The fake honours the real UserInvoice.mark_paid contract (Liskov for test
+    # fakes): the capture handler routes the PAID transition through mark_paid,
+    # so the mock must flip status/payment_ref/paid_at the same way.
+    from vbwd.utils.datetime_utils import utcnow
+
+    def _mark_paid(payment_ref, payment_method):
+        inv.status = InvoiceStatus.PAID
+        inv.payment_ref = payment_ref
+        inv.payment_method = payment_method
+        inv.paid_at = utcnow()
+
+    inv.mark_paid.side_effect = _mark_paid
     return inv
 
 
@@ -619,12 +632,12 @@ class TestIdempotencyE2E:
 
 
 class TestStripeSubscriptionLinking:
-    """The checkout webhook links the provider subscription via the port."""
+    """The checkout webhook publishes the provider-linked fact to the bus."""
 
     def test_stripe_sub_id_linked_on_checkout(
-        self, client, mock_stripe, mock_repos, ids, fake_lifecycle
+        self, client, mock_stripe, mock_repos, ids, published_events
     ):
-        """checkout.session.completed with a subscription calls the link port."""
+        """checkout.session.completed with a recurring object publishes a link fact."""
         li = _make_line_item(LineItemType.SUBSCRIPTION, ids["subscription"])
         invoice = _make_invoice(ids["invoice"], ids["user"], [li])
         mock_repos["invoice_repository"].find_by_id.return_value = invoice
@@ -643,23 +656,28 @@ class TestStripeSubscriptionLinking:
 
         _post_webhook(client, mock_stripe, "checkout.session.completed", checkout_obj)
 
-        fake_lifecycle.link_provider_subscription.assert_called_once_with(
-            ids["invoice"], "sub_stripe_123"
-        )
+        linked = [d for n, d in published_events if n == "payment.provider_linked"]
+        assert linked == [
+            {
+                "invoice_id": str(ids["invoice"]),
+                "provider": "stripe",
+                "provider_ref_id": "sub_stripe_123",
+            }
+        ]
 
 
 # ===========================================================================
-# Test: subscription.deleted webhook → SubscriptionCancelledEvent
+# Test: subscription.deleted webhook → payment.provider_cancelled fact
 # ===========================================================================
 
 
 class TestSubscriptionDeletedE2E:
-    """customer.subscription.deleted cancels via the lifecycle port."""
+    """customer.subscription.deleted publishes a provider-cancelled fact."""
 
     def test_cancellation_event_emitted(
-        self, client, mock_stripe, mock_repos, ids, fake_lifecycle
+        self, client, mock_stripe, mock_repos, ids, published_events
     ):
-        """customer.subscription.deleted should call the cancel port."""
+        """customer.subscription.deleted should publish the cancel fact."""
         stripe_sub_obj = {"id": "sub_stripe_del"}
 
         resp = _post_webhook(
@@ -667,25 +685,28 @@ class TestSubscriptionDeletedE2E:
         )
         assert resp.status_code == 200
 
-        fake_lifecycle.cancel_by_provider_subscription_id.assert_called_once_with(
-            provider="stripe",
-            provider_subscription_id="sub_stripe_del",
-            reason="stripe_subscription_deleted",
-        )
+        cancels = [d for n, d in published_events if n == "payment.provider_cancelled"]
+        assert cancels == [
+            {
+                "provider": "stripe",
+                "provider_ref_id": "sub_stripe_del",
+                "reason": "stripe_subscription_deleted",
+            }
+        ]
 
 
 # ===========================================================================
-# Test: invoice.payment_failed webhook → PaymentFailedEvent
+# Test: invoice.payment_failed webhook → payment.recurring_failed fact
 # ===========================================================================
 
 
 class TestPaymentFailedE2E:
-    """invoice.payment_failed flags failure via the lifecycle port."""
+    """invoice.payment_failed publishes a recurring-failed fact to the bus."""
 
     def test_payment_failed_event_emitted(
-        self, client, mock_stripe, mock_repos, ids, fake_lifecycle
+        self, client, mock_stripe, mock_repos, ids, published_events
     ):
-        """invoice.payment_failed should call the mark-failed port."""
+        """invoice.payment_failed should publish the recurring-failed fact."""
         stripe_invoice_obj = {
             "id": "in_fail_123",
             "subscription": "sub_stripe_fail",
@@ -697,11 +718,14 @@ class TestPaymentFailedE2E:
         )
         assert resp.status_code == 200
 
-        fake_lifecycle.mark_provider_payment_failed.assert_called_once_with(
-            provider="stripe",
-            provider_subscription_id="sub_stripe_fail",
-            error_message="Card declined",
-        )
+        failed = [d for n, d in published_events if n == "payment.recurring_failed"]
+        assert failed == [
+            {
+                "provider": "stripe",
+                "provider_ref_id": "sub_stripe_fail",
+                "error_message": "Card declined",
+            }
+        ]
 
 
 # ===========================================================================

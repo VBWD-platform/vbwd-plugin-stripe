@@ -1,6 +1,5 @@
 """Shared fixtures for Stripe plugin tests."""
 import sys
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,22 +8,41 @@ from vbwd.plugins.config_store import PluginConfigEntry
 
 
 @pytest.fixture
-def fake_lifecycle():
-    """Register a spy ISubscriptionLifecycle (the webhook write port).
+def published_events():
+    """Capture domain-neutral recurring-billing facts published to the bus.
 
-    Stripe webhooks delegate recurring link/renew/cancel/fail to this port; the
-    test asserts the right port call instead of the old subscription-repo seam.
+    S50.4: stripe webhooks no longer call a subscription write port — they
+    *publish* generic facts (payment.provider_linked / recurring_charge /
+    provider_cancelled / recurring_failed / invoice_failed) and the subscription
+    plugin (if enabled) subscribes. The test subscribes a spy and asserts the
+    right event name + domain-neutral payload, never a subscription symbol.
     """
-    from vbwd.services.subscription_lifecycle import (
-        ISubscriptionLifecycle,
-        register_subscription_lifecycle,
-        clear_subscription_lifecycle,
+    from vbwd.events.bus import event_bus
+    from vbwd.plugins.payment_route_helpers import (
+        EVENT_PROVIDER_LINKED,
+        EVENT_RECURRING_CHARGE,
+        EVENT_PROVIDER_CANCELLED,
+        EVENT_RECURRING_FAILED,
+        EVENT_INVOICE_FAILED,
     )
 
-    lifecycle = MagicMock(spec=ISubscriptionLifecycle)
-    register_subscription_lifecycle(lifecycle)
-    yield lifecycle
-    clear_subscription_lifecycle()
+    captured: list[tuple[str, dict]] = []
+
+    def _spy(event_name, data):
+        captured.append((event_name, data))
+
+    names = [
+        EVENT_PROVIDER_LINKED,
+        EVENT_RECURRING_CHARGE,
+        EVENT_PROVIDER_CANCELLED,
+        EVENT_RECURRING_FAILED,
+        EVENT_INVOICE_FAILED,
+    ]
+    for name in names:
+        event_bus.subscribe(name, _spy)
+    yield captured
+    for name in names:
+        event_bus.unsubscribe(name, _spy)
 
 
 @pytest.fixture

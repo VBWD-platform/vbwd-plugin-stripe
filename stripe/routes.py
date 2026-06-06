@@ -11,6 +11,10 @@ from vbwd.plugins.payment_route_helpers import (
     check_plugin_enabled,
     determine_session_mode,
     emit_payment_captured,
+    publish_provider_cancelled,
+    publish_provider_linked,
+    publish_recurring_charge,
+    publish_recurring_failed,
     validate_invoice_for_payment,
 )
 from vbwd.sdk.interface import SDKConfig
@@ -20,7 +24,6 @@ from vbwd.events.payment_events import (
     RefundReversedEvent,
 )
 from vbwd.events.line_item_registry import line_item_registry
-from vbwd.services.subscription_lifecycle import resolve_subscription_lifecycle
 
 from plugins.stripe.stripe.constants import STRIPE_CURRENCY_MULTIPLIER
 
@@ -265,25 +268,18 @@ def _handle_invoice_paid(stripe_invoice):
     if not stripe_sub_id:
         return
 
-    # Renewal invoice creation is owned by the subscription plugin (via the
-    # lifecycle port); no subscription model import in stripe.
-    renewal_invoice_id = resolve_subscription_lifecycle().record_provider_renewal(
-        provider="stripe",
-        provider_subscription_id=stripe_sub_id,
-        amount=str(stripe_invoice["amount_paid"] / 100),
-        currency=stripe_invoice.get("currency", "usd"),
-        provider_reference=stripe_invoice["id"],
-    )
-    if not renewal_invoice_id:
-        return
-
+    # Renewal invoice creation is owned by the recurring-object plugin (e.g.
+    # subscription), which subscribes to this fact. Stripe publishes blindly —
+    # no subscriber ⇒ no-op, so stripe stays subscription-free. The subscriber
+    # creates the renewal invoice and re-emits payment.captured, forwarding the
+    # exact metadata below so downstream capture handling is preserved.
     captured_amount_str = f"{stripe_invoice['amount_paid'] / 100:.2f}"
-    emit_payment_captured(
-        invoice_id=renewal_invoice_id,
-        payment_reference=stripe_invoice["id"],
+    publish_recurring_charge(
+        provider="stripe",
+        provider_ref_id=stripe_sub_id,
         amount=captured_amount_str,
         currency=stripe_invoice.get("currency", "usd"),
-        provider="stripe",
+        provider_reference=stripe_invoice["id"],
         transaction_id=stripe_invoice.get("payment_intent", ""),
         metadata={
             "stripe": {
@@ -299,9 +295,9 @@ def _handle_invoice_paid(stripe_invoice):
 
 def _handle_subscription_deleted(stripe_sub):
     """Handle Stripe customer.subscription.deleted — cancel our subscription."""
-    resolve_subscription_lifecycle().cancel_by_provider_subscription_id(
+    publish_provider_cancelled(
         provider="stripe",
-        provider_subscription_id=stripe_sub["id"],
+        provider_ref_id=stripe_sub["id"],
         reason="stripe_subscription_deleted",
     )
 
@@ -317,9 +313,9 @@ def _handle_payment_failed(stripe_invoice):
         if isinstance(stripe_invoice.get("last_payment_error"), dict)
         else "Payment failed"
     )
-    resolve_subscription_lifecycle().mark_provider_payment_failed(
+    publish_recurring_failed(
         provider="stripe",
-        provider_subscription_id=stripe_sub_id,
+        provider_ref_id=stripe_sub_id,
         error_message=error_message,
     )
 
@@ -473,12 +469,15 @@ def _handle_refund_updated(refund_obj, config):
 
 
 def _link_stripe_subscription(invoice_id, provider_subscription_id):
-    """Store provider_subscription_id on our Subscription after initial checkout.
+    """Publish that Stripe's recurring object is linked to this invoice.
 
-    Delegated to the subscription-lifecycle port (no subscription model import).
+    Stripe stays subscription-free — it publishes the fact and the
+    recurring-object plugin (if any) records the id. No-op if no subscriber.
     """
-    resolve_subscription_lifecycle().link_provider_subscription(
-        invoice_id, provider_subscription_id
+    publish_provider_linked(
+        invoice_id=invoice_id,
+        provider="stripe",
+        provider_ref_id=provider_subscription_id,
     )
 
 

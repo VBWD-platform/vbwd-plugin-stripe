@@ -351,10 +351,10 @@ class TestWebhookRecurring:
             content_type="application/json",
         )
 
-    def test_webhook_checkout_stores_subscription_id(
-        self, client, mock_stripe, mock_container, fake_lifecycle
+    def test_webhook_checkout_publishes_provider_linked(
+        self, client, mock_stripe, mock_container, published_events
     ):
-        """checkout.session.completed with a subscription links it via the port."""
+        """checkout.session.completed with a recurring object publishes a link fact."""
         invoice_id = uuid4()
 
         self._post_webhook(
@@ -371,17 +371,19 @@ class TestWebhookRecurring:
             },
         )
 
-        fake_lifecycle.link_provider_subscription.assert_called_once_with(
-            invoice_id, "sub_stripe_123"
-        )
+        linked = [d for n, d in published_events if n == "payment.provider_linked"]
+        assert linked == [
+            {
+                "invoice_id": str(invoice_id),
+                "provider": "stripe",
+                "provider_ref_id": "sub_stripe_123",
+            }
+        ]
 
-    def test_webhook_invoice_paid_creates_renewal(
-        self, client, mock_stripe, mock_container, fake_lifecycle
+    def test_webhook_invoice_paid_publishes_recurring_charge(
+        self, client, mock_stripe, mock_container, published_events
     ):
-        """invoice.paid (renewal) records the renewal via the port and emits."""
-        renewal_invoice_id = uuid4()
-        fake_lifecycle.record_provider_renewal.return_value = renewal_invoice_id
-
+        """invoice.paid (renewal) publishes a recurring-charge fact w/ metadata."""
         self._post_webhook(
             client,
             mock_stripe,
@@ -396,19 +398,21 @@ class TestWebhookRecurring:
             },
         )
 
-        fake_lifecycle.record_provider_renewal.assert_called_once_with(
-            provider="stripe",
-            provider_subscription_id="sub_stripe_123",
-            amount="9.99",
-            currency="eur",
-            provider_reference="in_stripe_renewal",
-        )
-        dispatcher = mock_container.event_dispatcher.return_value
-        dispatcher.emit.assert_called_once()
-        assert dispatcher.emit.call_args[0][0].invoice_id == renewal_invoice_id
+        charges = [d for n, d in published_events if n == "payment.recurring_charge"]
+        assert len(charges) == 1
+        charge = charges[0]
+        assert charge["provider"] == "stripe"
+        assert charge["provider_ref_id"] == "sub_stripe_123"
+        assert charge["amount"] == "9.99"
+        assert charge["currency"] == "eur"
+        assert charge["provider_reference"] == "in_stripe_renewal"
+        # Metadata forwarded verbatim so the subscriber can re-emit
+        # payment.captured byte-for-byte.
+        assert charge["metadata"]["stripe"]["invoice_id"] == "in_stripe_renewal"
+        assert charge["metadata"]["stripe"]["payment_intent_id"] == "pi_renewal"
 
     def test_webhook_invoice_paid_skips_first(
-        self, client, mock_stripe, mock_container, fake_lifecycle
+        self, client, mock_stripe, mock_container, published_events
     ):
         """invoice.paid with billing_reason=subscription_create should be skipped."""
         self._post_webhook(
@@ -425,37 +429,12 @@ class TestWebhookRecurring:
             },
         )
 
-        fake_lifecycle.record_provider_renewal.assert_not_called()
-        mock_container.event_dispatcher.return_value.emit.assert_not_called()
+        assert [n for n, _ in published_events] == []
 
-    def test_webhook_invoice_paid_no_renewal_no_emit(
-        self, client, mock_stripe, mock_container, fake_lifecycle
+    def test_webhook_subscription_deleted_publishes_cancel(
+        self, client, mock_stripe, mock_container, published_events
     ):
-        """When the port returns no renewal id (no match / already processed),
-        the webhook emits nothing — dedup is the port's concern."""
-        fake_lifecycle.record_provider_renewal.return_value = None
-
-        self._post_webhook(
-            client,
-            mock_stripe,
-            "invoice.paid",
-            {
-                "id": "in_duplicate",
-                "subscription": "sub_123",
-                "billing_reason": "subscription_cycle",
-                "amount_paid": 999,
-                "currency": "eur",
-                "payment_intent": "pi_dup",
-            },
-        )
-
-        fake_lifecycle.record_provider_renewal.assert_called_once()
-        mock_container.event_dispatcher.return_value.emit.assert_not_called()
-
-    def test_webhook_subscription_deleted_cancels(
-        self, client, mock_stripe, mock_container, fake_lifecycle
-    ):
-        """customer.subscription.deleted cancels via the lifecycle port."""
+        """customer.subscription.deleted publishes a provider-cancelled fact."""
         self._post_webhook(
             client,
             mock_stripe,
@@ -463,16 +442,19 @@ class TestWebhookRecurring:
             {"id": "sub_deleted_123"},
         )
 
-        fake_lifecycle.cancel_by_provider_subscription_id.assert_called_once_with(
-            provider="stripe",
-            provider_subscription_id="sub_deleted_123",
-            reason="stripe_subscription_deleted",
-        )
+        cancels = [d for n, d in published_events if n == "payment.provider_cancelled"]
+        assert cancels == [
+            {
+                "provider": "stripe",
+                "provider_ref_id": "sub_deleted_123",
+                "reason": "stripe_subscription_deleted",
+            }
+        ]
 
-    def test_webhook_payment_failed_emits_event(
-        self, client, mock_stripe, mock_container, fake_lifecycle
+    def test_webhook_payment_failed_publishes_recurring_failed(
+        self, client, mock_stripe, mock_container, published_events
     ):
-        """invoice.payment_failed flags failure via the lifecycle port."""
+        """invoice.payment_failed publishes a recurring-failed fact."""
         self._post_webhook(
             client,
             mock_stripe,
@@ -485,11 +467,33 @@ class TestWebhookRecurring:
             },
         )
 
-        fake_lifecycle.mark_provider_payment_failed.assert_called_once_with(
-            provider="stripe",
-            provider_subscription_id="sub_123",
-            error_message="Card was declined",
+        failed = [d for n, d in published_events if n == "payment.recurring_failed"]
+        assert failed == [
+            {
+                "provider": "stripe",
+                "provider_ref_id": "sub_123",
+                "error_message": "Card was declined",
+            }
+        ]
+
+    def test_webhook_no_subscriber_is_noop(self, client, mock_stripe, mock_container):
+        """With NO subscriber registered (subscription disabled), the renewal
+        webhook still returns 200 — the published fact is a pure no-op, proving
+        stripe stays subscription-free."""
+        resp = self._post_webhook(
+            client,
+            mock_stripe,
+            "invoice.paid",
+            {
+                "id": "in_no_sub",
+                "subscription": "sub_orphan",
+                "billing_reason": "subscription_cycle",
+                "amount_paid": 999,
+                "currency": "eur",
+                "payment_intent": "pi_no_sub",
+            },
         )
+        assert resp.status_code == 200
 
 
 class TestBillingPeriodToStripeDaily:
