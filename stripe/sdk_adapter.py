@@ -5,6 +5,8 @@ from typing import Dict, Any, Optional
 from vbwd.sdk.base import BaseSDKAdapter
 from vbwd.sdk.interface import SDKConfig, SDKResponse
 
+from plugins.stripe.stripe.constants import STRIPE_CURRENCY_MULTIPLIER
+
 
 class StripeSDKAdapter(BaseSDKAdapter):
     """Stripe SDK adapter implementing ISDKAdapter.
@@ -223,6 +225,48 @@ class StripeSDKAdapter(BaseSDKAdapter):
                 )
 
         return self._with_idempotency(idempotency_key, _refund)
+
+    def create_transfer(
+        self,
+        amount: Decimal,
+        currency: str,
+        destination_account: str,
+        reference_id: str,
+    ) -> SDKResponse:
+        """Send money to a connected account via Stripe Connect Transfers.
+
+        `reference_id` doubles as the Stripe idempotency key, so a
+        retried call never creates a second transfer.
+        """
+        try:
+            transfer = self._stripe.Transfer.create(
+                amount=int(amount * STRIPE_CURRENCY_MULTIPLIER),
+                currency=currency.lower(),
+                destination=destination_account,
+                transfer_group=reference_id,
+                idempotency_key=reference_id,
+            )
+            return SDKResponse(
+                success=True,
+                data={"transfer_id": transfer.id, "reversed": transfer.reversed},
+            )
+        except self._stripe.error.StripeError as e:
+            return SDKResponse(
+                success=False, error=str(e), error_code=getattr(e, "code", None)
+            )
+
+    def get_transfer_status(self, transfer_id: str) -> SDKResponse:
+        """Get the current state of a Connect Transfer."""
+        try:
+            transfer = self._stripe.Transfer.retrieve(transfer_id)
+            return SDKResponse(
+                success=True,
+                data={"transfer_id": transfer.id, "reversed": transfer.reversed},
+            )
+        except self._stripe.error.StripeError as e:
+            return SDKResponse(
+                success=False, error=str(e), error_code=getattr(e, "code", None)
+            )
 
     def get_payment_status(self, payment_intent_id: str) -> SDKResponse:
         """Get current payment/session status."""

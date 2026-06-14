@@ -1,5 +1,5 @@
 """Stripe payment provider plugin."""
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from decimal import Decimal
 from uuid import UUID
 from vbwd.plugins.base import PluginMetadata
@@ -7,14 +7,28 @@ from vbwd.plugins.payment_provider import (
     PaymentProviderPlugin,
     PaymentResult,
     PaymentStatus,
+    PayoutError,
+    PayoutProvider,
+    PayoutResult,
 )
 
 if TYPE_CHECKING:
     from flask import Blueprint
 
 
-class StripePlugin(PaymentProviderPlugin):
-    """Stripe payment provider — Checkout Sessions with webhooks.
+PAYOUT_DESTINATION_SCHEMA: List[Dict[str, Any]] = [
+    {
+        "name": "account_id",
+        "type": "text",
+        "label_key": "withdraw.destination.stripe_account_id",
+    }
+]
+
+
+class StripePlugin(PaymentProviderPlugin, PayoutProvider):
+    """Stripe payment provider — Checkout Sessions with webhooks; payout
+    via Connect Transfers to an `acct_…` connected account (S79
+    `PayoutProvider` capability).
 
     Class MUST be defined in __init__.py (not re-exported) due to
     discovery check obj.__module__ != full_module in manager.py.
@@ -156,6 +170,42 @@ class StripePlugin(PaymentProviderPlugin):
                 status=PaymentStatus.REFUNDED,
             )
         return PaymentResult(success=False, error_message=resp.error)
+
+    def get_payout_destination_schema(self) -> List[Dict[str, Any]]:
+        return PAYOUT_DESTINATION_SCHEMA
+
+    def create_payout(
+        self,
+        amount: Decimal,
+        currency: str,
+        destination: Dict[str, Any],
+        reference_id: str,
+    ) -> PayoutResult:
+        destination_account = str(destination.get("account_id", "")).strip()
+        if not destination_account:
+            raise PayoutError("Stripe payout requires a destination account_id")
+        adapter = self._get_adapter()
+        resp = adapter.create_transfer(
+            amount=amount,
+            currency=currency,
+            destination_account=destination_account,
+            reference_id=reference_id,
+        )
+        if not resp.success:
+            raise PayoutError(f"Stripe payout failed: {resp.error}")
+        # A created Connect Transfer is settled to the connected account
+        # synchronously — acceptance means the money has moved.
+        return PayoutResult(
+            provider_payout_id=resp.data.get("transfer_id", ""),
+            status="completed",
+        )
+
+    def get_payout_status(self, provider_payout_id: str) -> str:
+        adapter = self._get_adapter()
+        resp = adapter.get_transfer_status(provider_payout_id)
+        if not resp.success:
+            raise PayoutError(f"Stripe payout status lookup failed: {resp.error}")
+        return "failed" if resp.data.get("reversed") else "completed"
 
     def verify_webhook(self, payload: bytes, signature: str) -> bool:
         from flask import current_app
