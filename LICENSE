@@ -8,34 +8,34 @@ Licensor:               Daniil Tkachev
 Licensed Work:          VBWD Platform and its parts (the "Licensed Work")
                         The Licensed Work is (c) 2025-2045 Daniil Tkachev.
 
-Additional Use Grant:   You may make production use of the Licensed Work, provided that
-                        such production use (including any direct or indirect monetization,
-                        SaaS offering, commercial deployment, or incorporation into a
-                        revenue-generating product or service) satisfies **at least one** of
-                        the following conditions at all times:
+Additional Use Grant:   The VBWD-core modules are free to use for commercial
+                        purposes (including any direct or indirect monetization,
+                        SaaS offering, commercial deployment, or incorporation into
+                        a revenue-generating product or service), provided that at
+                        all times your (and your affiliates') total annual sales
+                        directly or indirectly attributable to the Licensed Work
+                        (or any derivative, modified version, or product/service
+                        that embeds, relies on, or is delivered through VBWD) do
+                        NOT exceed the value of 6.7 BTC (six point seven Bitcoin)
+                        for the applicable reporting year.
 
-                        a) Your (and your affiliates') total annual revenue directly or
-                           indirectly attributable to the Licensed Work (or any derivative,
-                           modified version, or product/service that embeds/relies on it)
-                           is less than USD 5,000 (five thousand United States dollars),
-                           or the equivalent amount in other currencies using the fair
-                           market exchange rate at the time of assessment; **or**
+                        Valuation of the threshold:
+                        The value of 6.7 BTC is determined using the arithmetic
+                        average of the daily BTC/USD closing spot price over the
+                        relevant reporting year (the calendar year being assessed).
+                        Your annual sales are converted to USD using the fair market
+                        exchange rate for the same reporting year and compared
+                        against that averaged threshold.
 
-                        b) The total number of active end-user accounts, seats, paying
-                           customers, or authenticated users (however defined in your
-                           product) using or accessing the Licensed Work (or any
-                           derivative or incorporated version) is fewer than 24.
-
-                        If neither condition (a) nor (b) is met, you must purchase a
-                        separate commercial license from the Licensor (or refrain from
-                        such exceeding production use).
+                        If your annual sales exceed this threshold, you must
+                        purchase a separate commercial license from the Licensor
+                        (or refrain from such exceeding production use).
 
 Change Date:            [Four years from first public release under this license, e.g. 2030-03-19]
 
 Change License:         Apache License, Version 2.0
                         https://www.apache.org/licenses/LICENSE-2.0
 
-Additional Use Grant
 Additional Terms (if any): None
 
 Terms
