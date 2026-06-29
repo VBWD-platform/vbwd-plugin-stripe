@@ -38,7 +38,7 @@ class StripePlugin(PaymentProviderPlugin, PayoutProvider):
     def metadata(self) -> PluginMetadata:
         return PluginMetadata(
             name="stripe",
-            version="26.6",
+            version="26.6.1",
             author="VBWD Team",
             description="Stripe payment provider — Checkout Sessions with webhooks",
             # S50.4 — recurring billing is event-driven: webhooks publish
