@@ -21,7 +21,7 @@ class TestStripePluginMetadata:
 
     def test_metadata_version(self, plugin):
         """plugin.metadata.version should be '1.0.0'."""
-        assert plugin.metadata.version == "1.0.0"
+        assert plugin.metadata.version == "26.6"
 
     def test_metadata_author(self, plugin):
         """plugin.metadata.author should be 'VBWD Team'."""
