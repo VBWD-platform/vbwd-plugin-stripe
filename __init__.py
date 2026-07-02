@@ -2,7 +2,7 @@
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from decimal import Decimal
 from uuid import UUID
-from vbwd.plugins.base import PluginMetadata
+from vbwd.plugins.base import PluginMetadata, PublicRouteDeclaration
 from vbwd.plugins.payment_provider import (
     PaymentProviderPlugin,
     PaymentResult,
@@ -47,6 +47,14 @@ class StripePlugin(PaymentProviderPlugin, PayoutProvider):
             # (subscription disabled) ⇒ the published fact is a no-op, so stripe
             # stays subscription-free and declares no subscription dependency.
             dependencies=[],
+        )
+
+    def declare_public_routes(self) -> PublicRouteDeclaration:
+        """Public Stripe provider webhook (verified by Stripe signature)."""
+        return PublicRouteDeclaration(
+            mutation={
+                "/api/v1/plugins/stripe/webhook": "Stripe provider webhook; verified by Stripe signature in handler.",
+            },
         )
 
     def get_blueprint(self) -> Optional["Blueprint"]:
