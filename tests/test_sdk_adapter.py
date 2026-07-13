@@ -239,3 +239,44 @@ class TestStripeSDKAdapter:
             call_kwargs.kwargs.get("mode") == "subscription"
             or call_kwargs[1].get("mode") == "subscription"
         )
+
+    def test_create_subscription_session_no_trial_omits_subscription_data(
+        self, adapter, mock_stripe
+    ):
+        """Without a trial, no subscription_data is sent (cycle 1 bills at once)."""
+        mock_session = MagicMock()
+        mock_session.id = "cs_sub_notrial"
+        mock_session.url = "https://checkout.stripe.com/cs_sub_notrial"
+        mock_stripe.checkout.Session.create.return_value = mock_session
+
+        adapter.create_subscription_session(
+            customer_id="cus_test",
+            line_items=[{"price_data": {"currency": "eur", "unit_amount": 999}}],
+            metadata={"invoice_id": "inv_1"},
+            success_url="https://example.com/ok",
+            cancel_url="https://example.com/cancel",
+        )
+
+        call_kwargs = mock_stripe.checkout.Session.create.call_args.kwargs
+        assert "subscription_data" not in call_kwargs
+
+    def test_create_subscription_session_with_trial_sets_trial_period_days(
+        self, adapter, mock_stripe
+    ):
+        """A positive trial defers the first charge via subscription_data."""
+        mock_session = MagicMock()
+        mock_session.id = "cs_sub_trial"
+        mock_session.url = "https://checkout.stripe.com/cs_sub_trial"
+        mock_stripe.checkout.Session.create.return_value = mock_session
+
+        adapter.create_subscription_session(
+            customer_id="cus_test",
+            line_items=[{"price_data": {"currency": "eur", "unit_amount": 999}}],
+            metadata={"invoice_id": "inv_1"},
+            success_url="https://example.com/ok",
+            cancel_url="https://example.com/cancel",
+            trial_period_days=14,
+        )
+
+        call_kwargs = mock_stripe.checkout.Session.create.call_args.kwargs
+        assert call_kwargs["subscription_data"] == {"trial_period_days": 14}

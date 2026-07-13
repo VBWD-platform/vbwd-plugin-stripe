@@ -87,6 +87,20 @@ def _build_stripe_subscription_items(invoice):
     return items
 
 
+def _resolve_subscription_trial_days(invoice):
+    """Largest positive free-trial length across the invoice's recurring items.
+
+    Read from the extensible line-item registry (no subscription model import);
+    None when no recurring item declares a trial, so cycle 1 bills immediately.
+    """
+    trial_days = 0
+    for li in invoice.line_items:
+        spec = line_item_registry.recurring_billing_spec(li)
+        if spec and spec.trial_days and spec.trial_days > trial_days:
+            trial_days = spec.trial_days
+    return trial_days or None
+
+
 @stripe_plugin_bp.route("/create-session", methods=["POST"])
 @require_auth
 def create_session():
@@ -127,12 +141,14 @@ def create_session():
             user_repo.save(user)
 
         line_items = _build_stripe_subscription_items(invoice)
+        trial_period_days = _resolve_subscription_trial_days(invoice)
         response = adapter.create_subscription_session(
             customer_id=customer_id,
             line_items=line_items,
             metadata=base_meta,
             success_url=success_url,
             cancel_url=cancel_url,
+            trial_period_days=trial_period_days,
         )
     else:
         # One-time: check if authorize-only or immediate capture

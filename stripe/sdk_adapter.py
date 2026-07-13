@@ -101,10 +101,15 @@ class StripeSDKAdapter(BaseSDKAdapter):
         metadata: dict,
         success_url: str,
         cancel_url: str,
+        trial_period_days: Optional[int] = None,
     ) -> SDKResponse:
-        """Create a Stripe Checkout Session with mode=subscription."""
+        """Create a Stripe Checkout Session with mode=subscription.
+
+        When ``trial_period_days`` is a positive int, the first recurring charge
+        is deferred by that many days (free trial); otherwise it bills at once.
+        """
         try:
-            session = self._stripe.checkout.Session.create(
+            create_params: Dict[str, Any] = dict(
                 mode="subscription",
                 customer=customer_id,
                 line_items=line_items,
@@ -112,6 +117,11 @@ class StripeSDKAdapter(BaseSDKAdapter):
                 success_url=success_url,
                 cancel_url=cancel_url,
             )
+            if trial_period_days and trial_period_days > 0:
+                create_params["subscription_data"] = {
+                    "trial_period_days": trial_period_days
+                }
+            session = self._stripe.checkout.Session.create(**create_params)
             return SDKResponse(
                 success=True,
                 data={"session_id": session.id, "session_url": session.url},
