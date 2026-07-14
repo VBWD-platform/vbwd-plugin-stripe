@@ -116,6 +116,24 @@ def create_session():
 
     adapter = _get_adapter(config)
     mode = determine_session_mode(invoice)
+
+    subscription_line_items: list = []
+    if mode == "subscription":
+        subscription_line_items = _build_stripe_subscription_items(invoice)
+        if not subscription_line_items:
+            # Divergence guard: the mode-check flagged this invoice recurring but
+            # no line item produced a Stripe billing spec (e.g. a plan with no
+            # billing period, whose spec lookup raised and was swallowed by the
+            # registry). Never send Stripe mode=subscription with empty
+            # line_items — it rejects the request. Fall back to a one-time
+            # payment for the still-chargeable lines.
+            logger.warning(
+                "Invoice %s resolved to subscription mode but produced no Stripe "
+                "subscription line items; falling back to one-time payment mode.",
+                invoice.id,
+            )
+            mode = "payment"
+
     base_meta = {"invoice_id": str(invoice.id), "user_id": str(g.user_id)}
     # S21 — shared helper. Native iOS/macOS apps get a deep link they can
     # intercept via ASWebAuthenticationSession; web falls back to Origin.
@@ -140,11 +158,10 @@ def create_session():
             user.payment_customer_id = customer_id
             user_repo.save(user)
 
-        line_items = _build_stripe_subscription_items(invoice)
         trial_period_days = _resolve_subscription_trial_days(invoice)
         response = adapter.create_subscription_session(
             customer_id=customer_id,
-            line_items=line_items,
+            line_items=subscription_line_items,
             metadata=base_meta,
             success_url=success_url,
             cancel_url=cancel_url,
