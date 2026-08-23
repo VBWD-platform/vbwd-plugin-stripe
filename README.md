@@ -54,3 +54,12 @@ docker compose run --rm test python -m pytest plugins/stripe/tests/ -v
 | 👤 Frontend (user) | [vbwd-fe-user-plugin-stripe-payment](https://github.com/VBWD-platform/vbwd-fe-user-plugin-stripe-payment) |
 
 **Core:** [vbwd-backend](https://github.com/VBWD-platform/vbwd-backend)
+
+## Documentation
+
+Full platform documentation lives at **[vbwd.cc/docs](https://vbwd.cc/docs)**.
+
+- [Plugin system](https://vbwd.cc/docs-plugin-system) — how backend plugins are registered, enabled, and configured
+- [Payments](https://vbwd.cc/docs-core-payments) — documentation for this plugin's domain
+- [Architecture](https://vbwd.cc/docs-architecture) — platform layering and the core-agnosticism rule
+- [Getting started](https://vbwd.cc/docs-getting-started) — install a VBWD instance and enable plugins
